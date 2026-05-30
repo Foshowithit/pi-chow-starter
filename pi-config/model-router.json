@@ -1,0 +1,50 @@
+{
+  "defaultProfile": "balanced",
+  "debug": false,
+  "profiles": {
+    "balanced": {
+      "high": {
+        "model": "ollama/deepseek-v4-pro:cloud",
+        "thinking": "xhigh"
+      },
+      "medium": {
+        "model": "ollama/deepseek-v4-flash:cloud",
+        "thinking": "xhigh"
+      },
+      "low": {
+        "model": "ollama/deepseek-v4-flash:cloud",
+        "thinking": "off"
+      }
+    },
+    "fast": {
+      "high": {
+        "model": "ollama/deepseek-v4-flash:cloud",
+        "thinking": "xhigh"
+      },
+      "medium": {
+        "model": "ollama/deepseek-v4-flash:cloud",
+        "thinking": "xhigh"
+      },
+      "low": {
+        "model": "ollama/deepseek-v4-flash:cloud",
+        "thinking": "off"
+      }
+    },
+    "thorough": {
+      "high": {
+        "model": "ollama/deepseek-v4-pro:cloud",
+        "thinking": "xhigh"
+      },
+      "medium": {
+        "model": "ollama/deepseek-v4-pro:cloud",
+        "thinking": "xhigh"
+      },
+      "low": {
+        "model": "ollama/deepseek-v4-flash:cloud",
+        "thinking": "xhigh"
+      }
+    }
+  },
+  "routerModel": "ollama/deepseek-v4-flash:cloud",
+  "routerThinking": "off"
+}

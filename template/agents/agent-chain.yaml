@@ -1,0 +1,13 @@
+trading-quant:
+  description: "ML / algo-trading pipeline — researcher inspects first, architect designs, planner sequences, developer writes, reviewer audits"
+  steps:
+    - agent: trading-quant-researcher
+      prompt: "$ORIGINAL\n\nYou are the first step in the trading-quant chain. Build an evidence-backed repo research brief for this request before any architecture decisions are made."
+    - agent: trading-quant-architect
+      prompt: "Use the researcher's evidence below plus the original request to produce a concrete architecture and implementation plan.\n\nOriginal request: $ORIGINAL\n\nResearch summary:\n$INPUT"
+    - agent: trading-quant-planner
+      prompt: "Turn the researcher findings and architect plan into ordered, file-level developer steps with validation commands.\n\n$INPUT"
+    - agent: trading-quant-developer
+      prompt: "Execute the plan with the smallest safe source edits. Do not place live orders or call broker/market-data services.\n\n$INPUT"
+    - agent: trading-quant-reviewer
+      prompt: "Review the developer output against the original request and plan. Report blockers, quant correctness issues, broker/live-order safety risks, tests, and operational risks.\n\nOriginal request: $ORIGINAL\n\nDeveloper report: $INPUT"

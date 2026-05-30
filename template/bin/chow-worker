@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# chow-worker — Delegate bounded tasks to specialist sub-agents
+# Usage:
+#   chow-worker coder "Implement feature X"
+#   chow-worker researcher "Research Y and report findings"
+set -euo pipefail
+
+WORKER_MODEL="${CHOW_WORKER_MODEL:-ollama/deepseek-v4-flash:cloud}"
+PI_BIN="${PI_BIN:-$HOME/.local/share/pi-node/current/bin/pi}"
+
+if [ $# -lt 2 ]; then
+  echo "Usage: chow-worker <agent-type> <task-description>"
+  echo ""
+  echo "Agent types:"
+  echo "  coder       — Bounded implementation task"
+  echo "  researcher  — Bounded investigation/research task"
+  echo "  auditor     — Code review, bug finding, smoke testing"
+  exit 1
+fi
+
+AGENT_TYPE="$1"
+shift
+TASK="$*"
+
+case "$AGENT_TYPE" in
+  coder)
+    PROMPT="You are a coder agent. Implement this bounded task precisely. Do only what's asked. Run validation after changes. Report what you did, what files changed, and any issues found.
+
+Task: $TASK"
+    ;;
+  researcher)
+    PROMPT="You are a researcher agent. Investigate this topic thoroughly. Read relevant files, search the web if needed, and produce a structured report. Do not edit files unless asked.
+
+Task: $TASK"
+    ;;
+  auditor)
+    PROMPT="You are an auditor agent. Review code, find bugs, test endpoints, or validate assumptions. Do NOT edit application code — audit and report. Be thorough but fast. Cite file:line for every finding.
+
+Task: $TASK"
+    ;;
+  *)
+    echo "Unknown agent type: $AGENT_TYPE"
+    echo "Valid types: coder, researcher, auditor"
+    exit 1
+    ;;
+esac
+
+exec "$PI_BIN" --model "$WORKER_MODEL" -p "$PROMPT"

@@ -1,0 +1,10 @@
+{
+  "ollama": {
+    "type": "api_key",
+    "key": "your-ollama-cloud-api-key-here"
+  },
+  "opencode-go": {
+    "type": "api_key",
+    "key": "your-opencode-go-api-key-here"
+  }
+}

@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PI_BIN="${PI_BIN:-$HOME/.local/share/pi-node/current/bin/pi}"
+NODE_BIN="${NODE_BIN:-node}"
+PROMPT_BUILDER="$HOME/.pi/agent/chow/build-prompt.mjs"
+SESSION_DIR="${CHOW_CLI_SESSION_DIR:-$HOME/.pi/agent/sessions/chow-terminal}"
+GENERATED_PROMPT="$HOME/.pi/agent/chow/SYSTEM.generated.md"
+
+usage() {
+  cat <<'EOF'
+chow — Turn pi into a terminal-native AI agent with identity, memory, and skills
+
+Usage:
+  chow                         Start a new interactive session
+  chow -c                      Continue latest session
+  chow -r                      Pick an old session to resume
+  chow -p "message"            One-shot print mode
+  chow "initial prompt"        Start interactive with initial prompt
+
+Chow helper commands:
+  chow --chow-help             Show this help
+  chow --chow-prompt           Print the generated system prompt
+  chow --chow-prompt-file      Rebuild SYSTEM.generated.md
+  chow --chow-memory           Open memory identity in $EDITOR
+  chow --chow-where            Show paths/config used by this wrapper
+  chow --dsflashmode [args...] Start with DS Flash worker helpers
+
+Useful env overrides:
+  CHOW_CLI_MODEL=provider/model       Override model
+  CHOW_CLI_PROVIDER=name              Provider override
+  CHOW_CLI_THINKING=high              Thinking level override
+  CHOW_CLI_SESSION_DIR=/path          Session storage override
+  CHOW_DSFLASH_MODE=1                 Enable worker-mode prompt
+  CHOW_WORKER_MODEL=provider/model    Worker model (default ollama/deepseek-v4-flash:cloud)
+  CHOW_MEMORY_ROOT=/path/to/memory    Memory mirror override
+  CHOW_CHAT_ID=chat_id                Memory lane override
+
+All normal pi flags still work: /new, /resume, --session, --fork, --model, --tools, etc.
+EOF
+}
+
+if [[ "${1:-}" == "--dsflashmode" ]]; then
+  export CHOW_DSFLASH_MODE=1
+  shift
+fi
+
+case "${1:-}" in
+  --chow-help)
+    usage
+    exit 0
+    ;;
+  --chow-prompt)
+    exec "$NODE_BIN" "$PROMPT_BUILDER"
+    ;;
+  --chow-prompt-file)
+    "$NODE_BIN" "$PROMPT_BUILDER" --write "$GENERATED_PROMPT" >/dev/null
+    echo "$GENERATED_PROMPT"
+    exit 0
+    ;;
+  --chow-memory)
+    chat_id="${CHOW_CHAT_ID:--1003665370879}"
+    root="${CHOW_MEMORY_ROOT:-$HOME/carl-bot/memory}"
+    mkdir -p "$root/$chat_id"
+    touch "$root/$chat_id/identity.md"
+    exec "${EDITOR:-vi}" "$root/$chat_id/identity.md"
+    ;;
+  --chow-where)
+    echo "pi:             $PI_BIN"
+    echo "prompt builder: $PROMPT_BUILDER"
+    echo "session dir:    $SESSION_DIR"
+    echo "memory root:    ${CHOW_MEMORY_ROOT:-$HOME/carl-bot/memory}"
+    echo "chat id:        ${CHOW_CHAT_ID:--1003665370879}"
+    echo "model override: ${CHOW_CLI_MODEL:-<pi default>}"
+    echo "provider over.: ${CHOW_CLI_PROVIDER:-<pi default>}"
+    echo "thinking over.: ${CHOW_CLI_THINKING:-<pi default>}"
+    echo "ds flash mode: ${CHOW_DSFLASH_MODE:-0}"
+    echo "worker model:  ${CHOW_WORKER_MODEL:-ollama/deepseek-v4-flash:cloud}"
+    exit 0
+    ;;
+esac
+
+mkdir -p "$SESSION_DIR" "$HOME/.pi/agent/chow"
+"$NODE_BIN" "$PROMPT_BUILDER" --write "$GENERATED_PROMPT" >/dev/null
+SYSTEM_PROMPT="$(cat "$GENERATED_PROMPT")"
+
+PI_ARGS=(--session-dir "$SESSION_DIR" --system-prompt "$SYSTEM_PROMPT")
+if [[ -n "${CHOW_CLI_PROVIDER:-}" ]]; then
+  PI_ARGS+=(--provider "$CHOW_CLI_PROVIDER")
+fi
+if [[ -n "${CHOW_CLI_MODEL:-}" ]]; then
+  PI_ARGS+=(--model "$CHOW_CLI_MODEL")
+fi
+if [[ -n "${CHOW_CLI_THINKING:-}" ]]; then
+  PI_ARGS+=(--thinking "$CHOW_CLI_THINKING")
+fi
+
+exec "$PI_BIN" "${PI_ARGS[@]}" "$@"
