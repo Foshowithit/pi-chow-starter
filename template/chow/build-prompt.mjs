@@ -1,21 +1,92 @@
 #!/usr/bin/env node
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 const HOME = os.homedir();
-const CHAT_ID = process.env.CHOW_CHAT_ID || "-1003665370879";
+
 const DEFAULT_MEMORY_ROOTS = [
 	path.join(HOME, "carl-bot", "memory"),
 	path.join(HOME, "hector-telegram-bot", "memory"),
 ];
+
+// ── Lane configuration ──────────────────────────────────────────────────
+
+const LANES = {
+	chow: {
+		persona: "Mr Chow",
+		laneLabel: "Chow CLI",
+		memoryRootDefault: path.join(HOME, "carl-bot", "memory"),
+		chatId: "-1003665370879",
+		sectionPrefix: "Chow",
+		machineBlock: `- Host mode: Chow CLI on Adam's Mac terminal, launched through \`~/.pi/agent/bin/chow\`.
+- This is NOT Telegram. Do not act constrained by Telegram message formatting or bot commands.
+- Normal Pi session controls apply: \`/new\`, \`/resume\`, \`/session\`, \`/tree\`, \`/fork\`, \`/clone\`, \`/compact\`, \`/model\`.
+- Chow CLI sessions are isolated under \`${process.env.CHOW_CLI_SESSION_DIR || path.join(HOME, ".pi", "agent", "sessions", "chow-terminal")}\`.
+- Current working directory is whatever directory Adam launches \`chow\` from; inspect it before making project assumptions.
+- Use terminal/file tools directly. Prefer verified command output over memory when they disagree.
+- Remote fleet access may require SSH/Tailscale credentials; if access fails, report exact failure and next fix.`,
+		personaIntro: `You are Mr Chow, Adam's terminal-native Pi agent.
+
+You are the same operational/coding/research assistant persona as Chow from the Telegram system, but this runtime is a first-class CLI lane: fast, direct, practical, and able to start/resume/fork normal Pi sessions from the terminal.`,
+	},
+	hector: {
+		persona: "Hector",
+		laneLabel: "Hector Dell GPU Agent",
+		memoryRootDefault: path.join(HOME, "carl-bot", "memory"), // shared until separate lane files exist
+		chatId: "-1003665370879",
+		sectionPrefix: "Hector",
+		machineBlock: `- Host mode: Hector/Dell WSL2 GPU render lane, launched from \`~/.pi/agent/bin/chow --lane hector\`.
+- Target machine: \`/home/adam\` on Dell WSL2 with NVIDIA GPU (RTX 4090).
+- Focus: Wan2.1 video generation and Remotion rendering pipeline.
+- This is NOT Telegram. Do not act constrained by Telegram message formatting or bot commands.
+- Normal Pi session controls apply: \`/new\`, \`/resume\`, \`/session\`, \`/tree\`, \`/fork\`, \`/clone\`, \`/compact\`, \`/model\`.
+- Hector CLI sessions are isolated under \`${process.env.CHOW_CLI_SESSION_DIR || path.join(HOME, ".pi", "agent", "sessions", "hector-terminal")}\`.
+- Current working directory is the project root on Dell WSL2; inspect it before making project assumptions.
+- Use terminal/file tools directly over SSH or Tailscale. Prefer verified command output over memory when they disagree.
+- Remote fleet access may require SSH/Tailscale credentials; if access fails, report exact failure and next fix.`,
+		personaIntro: `You are Hector, Adam's Dell WSL2 GPU render agent.
+
+You are a specialised assistant focused on Wan2.1 video generation and Remotion rendering. This runtime is a first-class CLI lane: fast, direct, practical, and able to start/resume/fork normal Pi sessions from the terminal.`,
+	},
+};
+
+function resolveLane() {
+	const args = process.argv.slice(2);
+	const laneIndex = args.indexOf("--lane");
+	let lane = "chow"; // default
+	if (
+		laneIndex >= 0 &&
+		args[laneIndex + 1] &&
+		!args[laneIndex + 1].startsWith("--")
+	) {
+		lane = args[laneIndex + 1];
+	}
+	if (process.env.CHOW_LANE) {
+		lane = process.env.CHOW_LANE;
+	}
+	if (!LANES[lane]) {
+		console.error(
+			`Unknown lane "${lane}". Valid lanes: ${Object.keys(LANES).join(", ")}`,
+		);
+		process.exit(1);
+	}
+	return lane;
+}
+
+const lane = resolveLane();
+const cfg = LANES[lane];
+
+// Allow env override of memory root for any lane
 const MEMORY_ROOT =
 	process.env.CHOW_MEMORY_ROOT ||
 	DEFAULT_MEMORY_ROOTS.find((root) => {
-		return fs.existsSync(path.join(root, CHAT_ID, "identity.md"));
+		return fs.existsSync(path.join(root, cfg.chatId, "identity.md"));
 	}) ||
-	DEFAULT_MEMORY_ROOTS[0];
-const CHAT_DIR = path.join(MEMORY_ROOT, CHAT_ID);
+	cfg.memoryRootDefault;
+
+const CHAT_DIR = path.join(MEMORY_ROOT, cfg.chatId);
 
 const MAX = {
 	identity: Number(process.env.CHOW_PROMPT_IDENTITY_CHARS || 22000),
@@ -89,6 +160,20 @@ function section(title, body) {
 	return `## ${title}\n\n${body.trim()}`;
 }
 
+// ── Lane-specific file overlays ──────────────────────────────────────────
+// Shared base files live in CHAT_DIR. Lane-specific overlays live in
+// CHAT_DIR/lanes/{lane}/. If a lane overlay exists, the prompt includes
+// the shared content first, then the lane overlay (separated by a divider).
+
+function readWithLaneOverlay(basename) {
+	const shared = read(path.join(CHAT_DIR, basename));
+	const laneFile = path.join(CHAT_DIR, "lanes", lane, basename);
+	const overlay = read(laneFile);
+	if (!overlay) return shared;
+	if (!shared) return overlay;
+	return shared + "\n\n---\n\n" + overlay;
+}
+
 const identityPath = path.join(CHAT_DIR, "identity.md");
 const activeTaskPath = path.join(CHAT_DIR, "active-task.md");
 const continuityPath = path.join(CHAT_DIR, "continuity-capsule.md");
@@ -96,24 +181,34 @@ const summariesPath = path.join(CHAT_DIR, "summaries.md");
 const playbookPath = path.join(CHAT_DIR, "playbook.md");
 const secondBrainDir = path.join(CHAT_DIR, "second-brain");
 
-const identity = limit(read(identityPath), MAX.identity, "identity");
-const activeTask = limit(read(activeTaskPath), MAX.activeTask, "active task");
+const identity = limit(
+	readWithLaneOverlay("identity.md"),
+	MAX.identity,
+	"identity",
+);
+const activeTask = limit(
+	readWithLaneOverlay("active-task.md"),
+	MAX.activeTask,
+	"active task",
+);
 const continuity = limit(
-	read(continuityPath),
+	readWithLaneOverlay("continuity-capsule.md"),
 	MAX.continuity,
 	"continuity capsule",
 );
-const summaries = limit(read(summariesPath), MAX.summaries, "summaries");
-const playbook = limit(read(playbookPath), MAX.playbook, "playbook");
+const summaries = limit(
+	readWithLaneOverlay("summaries.md"),
+	MAX.summaries,
+	"summaries",
+);
+const playbook = limit(
+	readWithLaneOverlay("playbook.md"),
+	MAX.playbook,
+	"playbook",
+);
 const secondBrain = buildSecondBrain();
 
-const machineBlock = `- Host mode: Chow CLI on Adam's Mac terminal, launched through \`~/.pi/agent/bin/chow\`.
-- This is NOT Telegram. Do not act constrained by Telegram message formatting or bot commands.
-- Normal Pi session controls apply: \`/new\`, \`/resume\`, \`/session\`, \`/tree\`, \`/fork\`, \`/clone\`, \`/compact\`, \`/model\`.
-- Chow CLI sessions are isolated under \`${process.env.CHOW_CLI_SESSION_DIR || path.join(HOME, ".pi", "agent", "sessions", "chow-terminal")}\`.
-- Current working directory is whatever directory Adam launches \`chow\` from; inspect it before making project assumptions.
-- Use terminal/file tools directly. Prefer verified command output over memory when they disagree.
-- Remote fleet access may require SSH/Tailscale credentials; if access fails, report exact failure and next fix.`;
+const machineBlock = cfg.machineBlock;
 
 const dsFlashMode = String(process.env.CHOW_DSFLASH_MODE || "").trim() === "1";
 const managerMode = String(process.env.CHOW_MANAGER_MODE || "").trim() === "1";
@@ -135,7 +230,7 @@ const managerModeBlock = managerMode
 	? `- 🔴 MANAGER MODE: All execution must be delegated via subagents. You have no file, command, or search tools — only subagent/intercom/switch_model/pi_messenger/analyze_image/structured_return/review_loop. Parallelize independent tasks; serialize code edits. Default worker: \`${process.env.CHOW_WORKER_MODEL || "opencode-go/deepseek-v4-flash"}\`.`
 	: "";
 
-const memoryBlock = `Memory source is the local Chow mirror at \`${CHAT_DIR}\`.
+const memoryBlock = `Memory source is the local ${cfg.laneLabel} mirror at \`${CHAT_DIR}\`.
 
 Files you may update with tools:
 1. Identity / durable facts: \`${identityPath}\`
@@ -154,9 +249,15 @@ Write-back rules:
 - For large memory changes, update \`continuity-capsule.md\` with the current state and leave \`summaries.md\` to automated/session-summary flows unless Adam explicitly asks.
 - After memory edits, regenerate the prompt with: \`node ~/.pi/agent/chow/build-prompt.mjs --write ~/.pi/agent/chow/SYSTEM.generated.md >/dev/null\`.`;
 
-const prompt = `You are Mr Chow, Adam's terminal-native Pi agent.
+const laneSpecificNote = (() => {
+	const laneDir = path.join(CHAT_DIR, "lanes", lane);
+	if (fs.existsSync(laneDir)) {
+		return `\n\nLane-specific memory files are available under \`${laneDir}/\` and are overlaid on top of the shared base files.`;
+	}
+	return "";
+})();
 
-You are the same operational/coding/research assistant persona as Chow from the Telegram system, but this runtime is a first-class CLI lane: fast, direct, practical, and able to start/resume/fork normal Pi sessions from the terminal.
+const prompt = `${cfg.personaIntro}
 
 ## Terminal Runtime
 
@@ -173,7 +274,7 @@ ${machineBlock}
 - Use memory as context, not gospel. Fresh command output wins.
 ${managerModeBlock ? managerModeBlock + "\n" : ""}
 
-${section("Chow Identity & Core Memory", identity || "(No identity.md found in local memory mirror.)")}
+${section(`${cfg.sectionPrefix} Identity & Core Memory`, identity || `(No identity.md found in local memory mirror.)`)}
 
 ${section("Active Task", activeTask)}
 
@@ -183,18 +284,67 @@ ${section("Recent Conversation Summaries", summaries)}
 
 ${section("Learned Playbook", playbook)}
 
-${section("Chow Second Brain Context", secondBrain)}
+${section(`${cfg.sectionPrefix} Second Brain Context`, secondBrain)}
 ${dsFlashWorkerBlock ? dsFlashWorkerBlock + "\n\n" : ""}---
-
 ## Memory Instructions
 
-${memoryBlock}
+${memoryBlock}${laneSpecificNote}
 
 ## CLI-Specific Promise
 
-Adam wants Chow available in the terminal like Pi: easy new sessions, resume old sessions, and no need to use Telegram. Treat this wrapper as Chow's primary local terminal lane.`;
+Adam wants ${cfg.persona} available in the terminal like Pi: easy new sessions, resume old sessions, and no need to use Telegram. Treat this wrapper as ${cfg.persona}'s primary local terminal lane.`;
+
+// ── Stats / check mode ──────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
+const statsMode = args.includes("--stats") || args.includes("--check");
+
+if (statsMode) {
+	const sections = [
+		{ name: `${cfg.sectionPrefix} Identity & Core Memory`, content: identity },
+		{ name: "Active Task", content: activeTask },
+		{ name: "Continuity Capsule", content: continuity },
+		{ name: "Recent Conversation Summaries", content: summaries },
+		{ name: "Learned Playbook", content: playbook },
+		{ name: `${cfg.sectionPrefix} Second Brain Context`, content: secondBrain },
+	];
+
+	console.log(`\n=== Lane: ${lane} (${cfg.laneLabel}) ===`);
+	console.log(`Memory root: ${MEMORY_ROOT}`);
+	console.log(`Chat dir: ${CHAT_DIR}`);
+	console.log(`\nSection stats:\n`);
+	console.log(
+		`${"Section".padEnd(38)} ${"Chars".padEnd(8)} ${"Est.Tokens".padEnd(12)} ${"Status"}`,
+	);
+	console.log("-".repeat(72));
+
+	let totalChars = 0;
+	let hasWarning = false;
+	for (const s of sections) {
+		const chars = s.content ? s.content.length : 0;
+		const estTokens = Math.ceil(chars / 4);
+		totalChars += chars;
+		const status = estTokens > 12000 ? "⚠️ OVER 12K" : "OK";
+		if (estTokens > 12000) hasWarning = true;
+		console.log(
+			`${s.name.padEnd(38)} ${String(chars).padEnd(8)} ${String(estTokens).padEnd(12)} ${status}`,
+		);
+	}
+	console.log("-".repeat(72));
+	console.log(
+		`${"TOTAL".padEnd(38)} ${String(totalChars).padEnd(8)} ${String(Math.ceil(totalChars / 4)).padEnd(12)}`,
+	);
+	if (hasWarning) {
+		console.log(
+			"\n⚠️  WARNING: Some sections exceed 12,000 estimated tokens. Consider reducing content.",
+		);
+	}
+	console.log("");
+	process.exit(0);
+}
+
+// ── Write mode ──────────────────────────────────────────────────────────
+
 const writeIndex = args.indexOf("--write");
 if (writeIndex >= 0) {
 	const next = args[writeIndex + 1];

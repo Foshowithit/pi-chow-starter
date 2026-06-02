@@ -136,10 +136,11 @@ Local: llava:7b, nomic-embed-text
 
 ## 🔴 LIVE: John Finance Terminal Continuous Build
 - Goal: Bloomberg-quality, AI-native personal terminal evolving into **John Finance Agent OS**: one chat interface over BOSS + Rico + specialist agents, eventually covering every market/asset/narrative on Earth as a financial-AGI proving ground.
+- Product identity (2026-06-02): Finance terminal is a user-facing extension/module of Chow, not a separate John personality. 'John Finance Terminal' remains repo/internal codename/subsystem; product/chat identity is Chow Finance Terminal / Mr Chow Finance. Chow is manager/orchestrator; BOSS/Rico/Paper Ledger are subsystems.
 - Strategy: parallel DS-Flash agents for planning/review/tests + GLM coder for implementation, Chow as merge captain. No auto-commit; each batch needs build/tests, adversarial review, endpoint smoke, vision QA, manual commit.
 - Strategic Rico merge decision (2026-05-29): merge Rico's **data system** into John, not Telegram bot code. Rico should become the always-on world/market intelligence substrate: daemons, attention scoring, news/market intel snapshots, prediction markets, learning/memory, operator API. John remains the UI/terminal and synthesis layer.
 - Data stack: Two-layer yfinance cache (memory+SQLite), SEC EDGAR provider with annual/quarterly/TTM modes, `/company/{ticker}/facts?mode=...`, BOSS engines via FastAPI 8787, plus planned Rico bridge endpoints for market-intel/attention/world-intelligence/prediction-markets.
-- CopilotKit/A2UI status (2026-05-29): BuiltInAgent wired; A2UI bridge extraction/ACTIVITY_SNAPSHOT pipeline fixed; custom ChatPanel now uses activity rendering; A2UI cards render. Latest UX decision: stop treating chat as the product. John should become an **AI-operated dashboard OS**: chat = command rail, main dashboard = AI Workspace. Planning doc: `docs/AI_DASHBOARD_OS_PLAN.md`. DS Flash coder implemented Batch 1-2 foundation: `DashboardCommandBus.tsx`, dashboard control tools (`setActiveTicker`, `setDashboardMode`, `focusPanel`, `openTickerView`, `setWatchlist`, `clearWorkspace`, `pinWorkspaceItem`), provider wiring, panel focus attributes/effect, workspace item rendering. DS Flash auditor found and Chow patched focus class leak, ephemeral clear semantics, arg validation, command-log clear, stale/unverified badges. DS Flash also implemented evidence/source enforcement: new `frontend/app/lib/evidence.ts`, LIVE/CACHED/STALE/UNVERIFIED/WARNING badges in A2UI renderers, catalog/API A2UI schema metadata fields, polished StockCard/DCF/table/signal/insight/earnings renderers, and Copilot evidence rule. Chow patched audit findings: UNVERIFIED badge ordering, InsightCard source-object/string compatibility, backend `A2UI_SCHEMA` alignment for `source`, `headers`, `ticker`, and `stats`. `npx tsc --noEmit` and `npm run build` passed; strict mode still has unrelated legacy errors in CompsCard/HITL/tool-renderers/ticker page. Chow created focused Archon workflow `.archon/workflows/john-finance-dashboard-os-batch.yaml` plus input `.archon/input/dashboard-os-batch.md`: 15-node multi-agent DAG with scope captain, 3 planners, 3 narrow implementers, 3 parallel reviewers, synthesis, fix, validation, final handoff; no auto-commit. Workflow is intended for Batch 4 workflow tools (`buildTickerDeepDive`, `buildComparisonWorkspace`, `buildMorn
+- CopilotKit/A2UI status (2026-05-29): BuiltInAgent wired; A2UI bridge extraction/ACTIVITY_SNAPSHOT pipeline fixed; custom ChatPanel now uses activity rendering; A2UI cards render. Latest UX decision: stop treating chat as the product. John should become an **AI-operated dashboard OS**: chat = command rail, main dashboard = AI Workspace. Planning doc: `docs/AI_DASHBOARD_OS_PLAN.md`. DS Flash coder implemented Batch 1-2 foundation: `DashboardCommandBus.tsx`, dashboard control tools (`setActiveTicker`, `setDashboardMode`, `focusPanel`, `openTickerView`, `setWatchlist`, `clearWorkspace`, `pinWorkspaceItem`), provider wiring, panel focus attributes/effect, workspace item rendering. DS Flash auditor found and Chow patched focus class leak, ephemeral clear semantics, arg validation, command-log clear, stale/unverified badges. DS Flash also implemented evidence/source enforcement: new `frontend/app/lib/evidence.ts`, LIVE/CACHED/STALE/UNVERIFIED/WARNING badges in A2UI renderers, catalog/API A2UI schema metadata fields, polished StockCard/DCF/table/signal/insight/earnings renderers, and Copilot evidence rule. Chow patched audit findings: UNVERIFIED badge ordering, InsightCard source-object/string compatibility, backend `A2UI_SCHEMA` alignment for `source`, `headers`, `ticker`, and `stats`. `npx tsc --noEmit` and `npm run build` passed; strict mode still has unrelated legacy errors in CompsCard/HITL/tool-renderers/ticker page. Chow created focused Archon workflow `.archon/workflows/john-finance-dashboard-os-batch
 
 [active task truncated at 5000 chars by Chow CLI prompt builder]
 
@@ -148,6 +149,8 @@ Local: llava:7b, nomic-embed-text
 # Chow Continuity Capsule
 
 Last updated: 2026-06-02
+
+- **Product identity (2026-06-02)**: Finance terminal = Chow extension/module, not a separate John personality. 'John Finance Terminal' is repo/internal codename only; product/chat is Chow Finance Terminal / Mr Chow Finance. Chow = orchestrator; BOSS/Rico/Paper Ledger = subsystems.
 
 ## Current Operating Lane
 - Chow CLI is Adam's terminal-native foreman on the Mac.
@@ -631,10 +634,9 @@ Give workers exact paths, constraints, expected output, and what not to touch. T
 Default worker model: `ollama2/deepseek-v4-flash:cloud`.
 
 ---
-
 ## Memory Instructions
 
-Memory source is the local Chow mirror at `/Users/adam26/carl-bot/memory/-1003665370879`.
+Memory source is the local Chow CLI mirror at `/Users/adam26/carl-bot/memory/-1003665370879`.
 
 Files you may update with tools:
 1. Identity / durable facts: `/Users/adam26/carl-bot/memory/-1003665370879/identity.md`
@@ -655,4 +657,4 @@ Write-back rules:
 
 ## CLI-Specific Promise
 
-Adam wants Chow available in the terminal like Pi: easy new sessions, resume old sessions, and no need to use Telegram. Treat this wrapper as Chow's primary local terminal lane.
+Adam wants Mr Chow available in the terminal like Pi: easy new sessions, resume old sessions, and no need to use Telegram. Treat this wrapper as Mr Chow's primary local terminal lane.
