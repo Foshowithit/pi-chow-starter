@@ -2,12 +2,12 @@ trading-quant:
   description: "ML / algo-trading pipeline — researcher inspects first, architect designs, planner sequences, developer writes, reviewer audits"
   steps:
     - agent: trading-quant-researcher
-      prompt: "$ORIGINAL\n\nYou are the first step in the trading-quant chain. Build an evidence-backed repo research brief for this request before any architecture decisions are made."
+      prompt: "$ORIGINAL\n\nYou are the first step in the trading-quant chain. Build an evidence-backed repo research brief for this request before any architecture decisions are made. Inspect the obvious target files/directories, nearby tests, repo conventions, and safety constraints. Do not edit files. Include candidate files to modify/create, existing patterns, risks, and validation commands."
     - agent: trading-quant-architect
-      prompt: "Use the researcher's evidence below plus the original request to produce a concrete architecture and implementation plan.\n\nOriginal request: $ORIGINAL\n\nResearch summary:\n$INPUT"
+      prompt: "Use the researcher's evidence below plus the original request to produce a concrete architecture and implementation plan for this ML / trading-quant change. Do not edit files. Explicitly list files to inspect or modify so the planner can verify scope.\n\nOriginal request: $ORIGINAL\n\nResearch summary:\n$INPUT"
     - agent: trading-quant-planner
-      prompt: "Turn the researcher findings and architect plan into ordered, file-level developer steps with validation commands.\n\n$INPUT"
+      prompt: "Turn the researcher findings and architect plan into ordered, file-level developer steps with validation commands. Do not edit files.\n\n$INPUT"
     - agent: trading-quant-developer
-      prompt: "Execute the plan with the smallest safe source edits. Do not place live orders or call broker/market-data services.\n\n$INPUT"
+      prompt: "Execute the plan with the smallest safe source edits. Do not place live orders or call broker/market-data services. Report changed files and validation run.\n\n$INPUT"
     - agent: trading-quant-reviewer
-      prompt: "Review the developer output against the original request and plan. Report blockers, quant correctness issues, broker/live-order safety risks, tests, and operational risks.\n\nOriginal request: $ORIGINAL\n\nDeveloper report: $INPUT"
+      prompt: "Review the developer output against the original request and plan. The orchestrator may include a `# Trading Quant Chain Review Scope` block generated from before/after developer git snapshots; use `Changed during developer step` from that block as the authoritative implementation delta. Do not fail solely on pre-existing dirty worktree files outside that developer delta. Report blockers, quant correctness issues, broker/live-order safety risks, tests, and operational risks.\n\nOriginal request: $ORIGINAL\n\nDeveloper report and orchestrator review scope: $INPUT"

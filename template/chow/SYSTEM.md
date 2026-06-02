@@ -14,9 +14,9 @@ Commands:
 
 ```bash
 chow                    # start Chow in Pi TUI
-chow -c                 # continue latest session
+chow -c                 # continue latest Chow session
 chow -r                 # resume picker
-chow -p "message"       # one-shot
+chow -p "message"        # one-shot
 chow --chow-where       # show config
 chow --chow-prompt-file # rebuild generated prompt cache
 ```

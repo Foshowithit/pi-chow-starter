@@ -2,3 +2,7 @@ node_modules/
 .env
 *.log
 .DS_Store
+/pi-config/auth.json
+/pi-config/models.json
+template/auth/auth.json
+sessions/

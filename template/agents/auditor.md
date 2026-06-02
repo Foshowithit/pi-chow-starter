@@ -1,6 +1,6 @@
 ---
 name: auditor
-description: Fast reviewer/auditor for code quality, bugs, data shapes, and smoke testing.
+description: Fast reviewer/auditor for code quality, bugs, data shapes, and smoke testing. Uses DeepSeek Flash for speed.
 tools: bash, read, write
 model: ollama/deepseek-v4-flash:cloud
 ---
