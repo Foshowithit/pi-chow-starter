@@ -1,0 +1,381 @@
+# chow-memory-curation — Daily pipeline that reads raw events, triages by
+# lane+importance, deduplicates, AI-summarizes, consolidates to markdown,
+# runs eval gates, and commits curated memory.
+#
+# Run with:
+#   archon workflow run chow-memory-curation
+#   chow-curate-memory                (wrapper script)
+#   chow-curate-memory --dry-run      (dry-run mode)
+#   chow-curate-memory --lane chow    (single lane only)
+
+name: chow-memory-curation
+description: |
+  Daily pipeline that reads raw events, triages by lane+importance,
+  deduplicates, AI-summarizes, consolidates to markdown, runs eval gates,
+  and commits curated memory.
+
+# Environment configurable via archon env or wrapper script:
+#   CHAT_DIR   — lane directory (default: /home/adam/carl-bot/memory/-1003665370879)
+#   MEMORY_ROOT — parent of CHAT_DIR with lane subdirs (chow, hector, jose, shared)
+#   DRY_RUN    — if "1", skip git commit/push in commit-memory node
+
+nodes:
+  # ── Node 1: collect-events ──────────────────────────────────────────
+  # Bash node. Gathers unprocessed events from all lane directories.
+  # No AI invoked — pure shell.
+  - id: collect-events
+    bash: |
+      set -euo pipefail
+
+      CHAT_DIR="${CHAT_DIR:-/home/adam/carl-bot/memory/-1003665370879}"
+      MEMORY_ROOT="${MEMORY_ROOT:-$(dirname "$CHAT_DIR")}"
+      ARTIFACTS="${ARTIFACTS_DIR:?ARTIFACTS_DIR not set}"
+
+      mkdir -p "$ARTIFACTS/raw"
+
+      combined="$ARTIFACTS/raw/events.json"
+      lanes_file="$ARTIFACTS/raw/lanes-active.txt"
+
+      # Start with an empty JSON array
+      printf '[' > "$combined"
+      first=1
+      active_lanes=()
+
+      for lane in chow hector jose shared; do
+        lane_dir="$MEMORY_ROOT/$lane"
+        events_file="$lane_dir/second-brain/events.ndjson"
+
+        if [[ -f "$events_file" ]]; then
+          echo "→ Found events for lane: $lane ($events_file)"
+          active_lanes+=("$lane")
+
+          # Append each line as a JSON object; track separator commas
+          while IFS= read -r line; do
+            if [[ -n "$line" ]]; then
+              if [[ $first -eq 1 ]]; then
+                first=0
+              else
+                printf ',' >> "$combined"
+              fi
+              printf '%s' "$line" >> "$combined"
+            fi
+          done < "$events_file"
+        else
+          echo "→ No events file for lane: $lane (skipping)"
+        fi
+      done
+
+      printf ']' >> "$combined"
+
+      # Keep only the last 200 events sorted by timestamp
+      # Requires jq; fall back to the raw file if jq is unavailable
+      if command -v jq &>/dev/null; then
+        # Sort by .timestamp descending, keep last 200
+        tmp_sorted="$(mktemp)"
+        jq -c 'sort_by(.timestamp // 0) | reverse | .[0:200]' "$combined" > "$tmp_sorted"
+        mv "$tmp_sorted" "$combined"
+      fi
+
+      # Write lanes-active.txt
+      printf '' > "$lanes_file"
+      for lane in "${active_lanes[@]}"; do
+        printf '%s\n' "$lane" >> "$lanes_file"
+      done
+
+      echo "Collected events from ${#active_lanes[@]} lanes"
+      echo "Active lanes: ${active_lanes[*]}"
+    timeout: 30000
+
+  # ── Node 2: triage-events ───────────────────────────────────────────
+  # AI node: confirm lane, re-score importance, drop noise.
+  - id: triage-events
+    provider: pi
+    model: opencode-go/deepseek-v4-flash
+    allowed_tools: [Read, Write, Bash]
+    depends_on: [collect-events]
+    prompt: |
+      You are triaging raw memory events for the Chow system.
+
+      Read the combined events file at $ARTIFACTS_DIR/raw/events.json.
+      Read the active lanes file at $ARTIFACTS_DIR/raw/lanes-active.txt.
+
+      For EACH event:
+      1. Confirm or correct the lane assignment. Valid lanes: chow, hector, jose, shared.
+      2. Re-score importance on a 1-5 scale (5 = critical decision or insight; 1 = trivial).
+      3. DROP noise — routine greetings, status pings with no context, errors without meaningful
+         context (pure stack traces with no decision or learning), emoji-only messages.
+      4. Keep everything else, even low-importance items, as long as they carry meaningful info.
+
+      Write the cleaned events as a JSON array to:
+        $ARTIFACTS_DIR/triage/triaged-events.json
+
+      Each event object should have fields:
+        - id (original or generated)
+        - timestamp
+        - lane (confirmed/corrected)
+        - importance (1-5)
+        - summary (1-2 sentence summary of what happened)
+        - original_text (truncated to 500 chars if needed)
+
+      Also write a triage report to:
+        $ARTIFACTS_DIR/triage/triage-report.md
+
+      The report must include:
+      - Total raw events received
+      - Number of events dropped and why (brief categories)
+      - Events per lane after triage
+      - Average importance score
+
+  # ── Node 3: dedup-merge ─────────────────────────────────────────────
+  # AI node: identify and merge duplicate/overlapping events.
+  - id: dedup-merge
+    provider: pi
+    model: opencode-go/deepseek-v4-flash
+    allowed_tools: [Read, Write, Bash]
+    depends_on: [triage-events]
+    prompt: |
+      You are deduplicating triaged memory events.
+
+      Read the triaged events at $ARTIFACTS_DIR/triage/triaged-events.json.
+
+      Identify events that describe the SAME work, decision, or topic across different timestamps.
+      Merge them into single events that combine all relevant information, keeping the earliest
+      timestamp and merging summaries into a comprehensive one.
+
+      Rules:
+      - Two events are duplicates if they refer to the same task/decision/topic even at different times
+      - Merge by keeping the earliest timestamp, combining summaries, and taking the max importance
+      - Do NOT merge events that are merely in the same lane but about different topics
+      - Preserve lane assignments — if merged events span lanes, use "shared"
+
+      Write the deduplicated events as a JSON array to:
+        $ARTIFACTS_DIR/dedup/merged-events.json
+
+      Also write a merge log to:
+        $ARTIFACTS_DIR/dedup/merge-log.md
+
+      The merge log must list every merge, showing:
+      - Which events were merged (their IDs/timestamps)
+      - What the merged event contains
+      - Reason for merging
+
+  # ── Node 4: generate-summaries ──────────────────────────────────────
+  # AI node: generate per-lane daily summaries and update existing memory files.
+  - id: generate-summaries
+    provider: pi
+    model: ollama/deepseek-v4-pro:cloud
+    allowed_tools: [Read, Write, Bash]
+    depends_on: [dedup-merge]
+    prompt: |
+      You are generating memory summaries from deduplicated events.
+
+      Read the merged events at $ARTIFACTS_DIR/dedup/merged-events.json.
+
+      The CHAT_DIR environment variable points to the main lane directory.
+      Default: CHAT_DIR=${CHAT_DIR:-/home/adam/carl-bot/memory/-1003665370879}
+      MEMORY_ROOT is the parent directory containing per-lane subdirectories.
+
+      For EACH lane that has events, do the following:
+
+      (a) Generate a daily summary file: $ARTIFACTS_DIR/summaries/{lane}/YYYY-MM-DD.md
+          with 3-5 bullet points covering the most important events for that lane today.
+          Use today's date for the filename.
+
+      (b) Generate an updated summaries.md for each lane that includes the new daily
+          entry appended to existing content. Read the current summaries.md from
+          {MEMORY_ROOT}/{lane}/summaries.md if it exists; if not, create a new one.
+          Write the updated file to: $ARTIFACTS_DIR/summaries/{lane}/summaries.md
+
+      (c) If events warrant a playbook change (new pattern, new rule, corrected assumption),
+          draft playbook updates to: $ARTIFACTS_DIR/summaries/playbook-updates.md
+
+      (d) Read {MEMORY_ROOT}/continuity-capsule.md if it exists. If state or priorities
+          have changed based on today's events, write an updated version to:
+          $ARTIFACTS_DIR/summaries/continuity-capsule.md
+
+      Also write a curation report to:
+        $ARTIFACTS_DIR/summaries/curation-report.md
+
+      The curation report must summarize:
+      - What was added/changed per lane
+      - Which lanes had no new content
+      - Whether playbook updates were drafted and why
+      - Whether continuity capsule was updated and what changed
+      - Total events processed in this pipeline run
+
+  # ── Node 5: eval-curation-quality ────────────────────────────────────
+  # AI node: adversarial quality review. Hard pass threshold: all scores ≥ 7.
+  - id: eval-curation-quality
+    provider: pi
+    model: opencode-go/deepseek-v4-flash
+    allowed_tools: [Read, Write, Bash]
+    depends_on: [generate-summaries]
+    prompt: |
+      You are an adversarial quality reviewer for curated memory.
+
+      Read the curation report at $ARTIFACTS_DIR/summaries/curation-report.md.
+      Read today's daily summary files in $ARTIFACTS_DIR/summaries/*/YYYY-MM-DD.md.
+      Read the source events at $ARTIFACTS_DIR/dedup/merged-events.json.
+
+      Score the curation on four dimensions (1-10 each):
+
+      (a) Factual accuracy — do summaries correctly reflect what happened in the source events?
+          Check for hallucinations or incorrect attributions.
+
+      (b) Completeness — were any important events missed? Check against the merged events list.
+
+      (c) Conciseness — is the output appropriately terse? No bloated prose, no repeated info,
+          no filler. Each bullet should add value.
+
+      (d) Lane accuracy — are events attributed to the correct lane? Check each event's lane
+          assignment against the content.
+
+      HARD PASS THRESHOLD: all four scores must be ≥ 7.
+
+      Write scores and justification to:
+        $ARTIFACTS_DIR/eval/curation-scores.json
+
+      The JSON should have the structure:
+      {
+        "factual_accuracy": { "score": N, "justification": "..." },
+        "completeness": { "score": N, "justification": "..." },
+        "conciseness": { "score": N, "justification": "..." },
+        "lane_accuracy": { "score": N, "justification": "..." },
+        "overall_pass": true/false
+      }
+
+      If ANY score is below 7, write specific improvement feedback to:
+        $ARTIFACTS_DIR/eval/curation-feedback.md
+
+      And create a flag file to fail the workflow:
+        $ARTIFACTS_DIR/eval/FAIL
+
+      The flag file should contain the failing dimensions and their scores.
+      This will cause the bash node below to detect the failure and exit non-zero.
+
+  # ── Node 6: commit-memory ────────────────────────────────────────────
+  # Bash node. Commits curated memory to git.
+  - id: commit-memory
+    depends_on: [eval-curation-quality]
+    trigger_rule: all_success
+    bash: |
+      set -euo pipefail
+
+      CHAT_DIR="${CHAT_DIR:-/home/adam/carl-bot/memory/-1003665370879}"
+      MEMORY_ROOT="${MEMORY_ROOT:-$(dirname "$CHAT_DIR")}"
+      ARTIFACTS="${ARTIFACTS_DIR:?ARTIFACTS_DIR not set}"
+      DRY_RUN="${DRY_RUN:-0}"
+
+      # Check for eval failure flag
+      if [[ -f "$ARTIFACTS/eval/FAIL" ]]; then
+        echo "❌ Curation quality gate FAILED. Details:"
+        cat "$ARTIFACTS/eval/FAIL"
+        echo ""
+        echo "Review feedback at: $ARTIFACTS/eval/curation-feedback.md"
+        exit 1
+      fi
+
+      # Read curation scores
+      if [[ -f "$ARTIFACTS/eval/curation-scores.json" ]]; then
+        echo "✅ Curation quality scores:"
+        cat "$ARTIFACTS/eval/curation-scores.json"
+        echo ""
+      fi
+
+      cd "$MEMORY_ROOT"
+      TODAY=$(date +%Y-%m-%d)
+      CHANGES=0
+
+      # For each lane with new summaries, append/copy the day's content
+      for lane in chow hector jose shared; do
+        summary_dir="$ARTIFACTS/summaries/$lane"
+        lane_dir="$MEMORY_ROOT/$lane"
+
+        if [[ -d "$summary_dir" ]]; then
+          # Copy daily summary
+          daily_file="$summary_dir/$TODAY.md"
+          if [[ -f "$daily_file" ]]; then
+            mkdir -p "$lane_dir"
+            cp "$daily_file" "$lane_dir/$TODAY.md"
+            echo "→ Copied $lane/$TODAY.md"
+            CHANGES=$((CHANGES + 1))
+          fi
+
+          # Update summaries.md — append new content
+          updated_summaries="$summary_dir/summaries.md"
+          if [[ -f "$updated_summaries" ]]; then
+            mkdir -p "$lane_dir"
+            cp "$updated_summaries" "$lane_dir/summaries.md"
+            echo "→ Updated $lane/summaries.md"
+            CHANGES=$((CHANGES + 1))
+          fi
+        fi
+      done
+
+      # Update continuity-capsule.md
+      capsule="$ARTIFACTS/summaries/continuity-capsule.md"
+      if [[ -f "$capsule" ]]; then
+        cp "$capsule" "$MEMORY_ROOT/continuity-capsule.md"
+        echo "→ Updated continuity-capsule.md"
+        CHANGES=$((CHANGES + 1))
+      fi
+
+      # Merge playbook updates if present (with human-review-needed marker)
+      playbook_updates="$ARTIFACTS/summaries/playbook-updates.md"
+      if [[ -f "$playbook_updates" ]] && [[ -s "$playbook_updates" ]]; then
+        playbook="$MEMORY_ROOT/playbook.md"
+        if [[ -f "$playbook" ]]; then
+          # Append with review marker
+          printf '\n\n<!-- HUMAN-REVIEW-NEEDED %s -->\n' "$TODAY" >> "$playbook"
+          cat "$playbook_updates" >> "$playbook"
+          echo "→ Appended playbook updates (marked for human review)"
+        else
+          cp "$playbook_updates" "$playbook"
+          echo "→ Created new playbook.md from updates"
+        fi
+        CHANGES=$((CHANGES + 1))
+      fi
+
+      # Regenerate prompt via build-prompt.mjs for each lane
+      PROMPT_BUILDER="${PROMPT_BUILDER:-$HOME/.pi/agent/chow/build-prompt.mjs}"
+      NODE_BIN="${NODE_BIN:-node}"
+      if [[ -x "$(command -v "$NODE_BIN" 2>/dev/null)" ]] && [[ -f "$PROMPT_BUILDER" ]]; then
+        for lane in chow hector jose shared; do
+          lane_dir="$MEMORY_ROOT/$lane"
+          if [[ -d "$lane_dir" ]]; then
+            echo "→ Regenerating prompt for lane: $lane"
+            CHAT_DIR="$lane_dir" "$NODE_BIN" "$PROMPT_BUILDER" --write "$lane_dir/SYSTEM.generated.md" 2>/dev/null || \
+              echo "  (prompt builder not available for $lane, skipping)"
+          fi
+        done
+      fi
+
+      # Skip git operations in dry-run mode
+      if [[ "$DRY_RUN" == "1" ]]; then
+        echo ""
+        echo "🏃 DRY RUN — skipping git commit/push"
+        echo "   Changes that would be committed: $CHANGES"
+        exit 0
+      fi
+
+      # Git commit and push
+      if [[ "$CHANGES" -gt 0 ]]; then
+        git add -A
+        COMMIT_MSG="memory: daily curation $TODAY"
+        git diff --cached --quiet || git commit -m "$COMMIT_MSG"
+
+        # Push if remote is configured
+        if git remote get-url origin &>/dev/null; then
+          git push origin HEAD 2>/dev/null || echo "→ Push failed (may need manual push)"
+        fi
+
+        # Capture commit hash
+        git rev-parse HEAD > "$ARTIFACTS/commit.txt" 2>/dev/null || true
+        echo ""
+        echo "✅ Committed: $COMMIT_MSG"
+        echo "   Hash: $(cat "$ARTIFACTS/commit.txt" 2>/dev/null || echo 'unknown')"
+      else
+        echo "No changes to commit."
+        echo "no-commit" > "$ARTIFACTS/commit.txt"
+      fi
+    timeout: 60000

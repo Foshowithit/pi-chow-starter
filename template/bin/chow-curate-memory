@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# chow-curate-memory — Invoke the Archon memory curation workflow
+#
+# Usage:
+#   chow-curate-memory               Run full curation pipeline
+#   chow-curate-memory --dry-run      Run without git commit/push
+#   chow-curate-memory --lane chow    Process only a single lane
+#   chow-curate-memory --help         Show this help
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORKFLOW_YAML="${SCRIPT_DIR}/../archon/chow-memory-curation.yaml"
+
+# Defaults
+CHAT_DIR="${CHAT_DIR:-/home/adam/carl-bot/memory/-1003665370879}"
+MEMORY_ROOT="${MEMORY_ROOT:-$(dirname "$CHAT_DIR")}"
+DRY_RUN=0
+LANE_FILTER=""
+ARCHON_BIN="${ARCHON_BIN:-$(command -v archon 2>/dev/null || echo archon)}"
+
+usage() {
+  cat <<'EOF'
+chow-curate-memory — Daily memory curation via Archon DAG
+
+Usage:
+  chow-curate-memory [options]
+
+Options:
+  --dry-run           Run pipeline but skip git commit/push
+  --lane LANE         Process only the specified lane (chow|hector|jose|shared)
+  --chat-dir DIR      Override CHAT_DIR (default: /home/adam/carl-bot/memory/-1003665370879)
+  --help              Show this help
+
+Environment:
+  CHAT_DIR            Memory lane directory (default: /home/adam/carl-bot/memory/-1003665370879)
+  MEMORY_ROOT         Parent of lane directories (default: parent of CHAT_DIR)
+  DRY_RUN             Set to "1" to skip git operations
+  ARCHON_BIN          Path to archon binary
+
+Examples:
+  chow-curate-memory                    # Full daily curation
+  chow-curate-memory --dry-run          # Preview without committing
+  chow-curate-memory --lane chow        # Only process Chow's lane
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --lane)
+      LANE_FILTER="$2"
+      shift 2
+      ;;
+    --chat-dir)
+      CHAT_DIR="$2"
+      MEMORY_ROOT="$(dirname "$CHAT_DIR")"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+# Validate lane filter if provided
+if [[ -n "$LANE_FILTER" ]]; then
+  case "$LANE_FILTER" in
+    chow|hector|jose|shared) ;;
+    *)
+      echo "Invalid lane: $LANE_FILTER. Must be one of: chow, hector, jose, shared"
+      exit 1
+      ;;
+  esac
+fi
+
+# Export env vars for the workflow
+export CHAT_DIR
+export MEMORY_ROOT
+export DRY_RUN
+
+# If lane filter, pass as ARGUMENTS so the workflow can conditionally use it
+ARGUMENTS=""
+if [[ -n "$LANE_FILTER" ]]; then
+  ARGUMENTS="--lane $LANE_FILTER"
+fi
+
+echo "╔══════════════════════════════════════════════════╗"
+echo "║   Chow Memory Curation Pipeline                 ║"
+echo "╠══════════════════════════════════════════════════╣"
+echo "║  CHAT_DIR:    $CHAT_DIR"
+echo "║  MEMORY_ROOT: $MEMORY_ROOT"
+echo "║  DRY_RUN:     $DRY_RUN"
+echo "║  LANE:        ${LANE_FILTER:-all}"
+echo "╚══════════════════════════════════════════════════╝"
+echo ""
+
+# Run the Archon workflow
+RESULT=0
+"$ARCHON_BIN" workflow run chow-memory-curation $ARGUMENTS || RESULT=$?
+
+if [[ $RESULT -eq 0 ]]; then
+  echo ""
+  echo "✅ Curation pipeline completed successfully."
+else
+  echo ""
+  echo "❌ Curation pipeline failed with exit code $RESULT."
+fi
+
+exit $RESULT
