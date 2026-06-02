@@ -161,16 +161,43 @@ function section(title, body) {
 
 // ── Lane-specific file overlays ──────────────────────────────────────────
 // Shared base files live in CHAT_DIR. Lane-specific overlays live in
-// CHAT_DIR/lanes/{lane}/. If a lane overlay exists, the prompt includes
-// the shared content first, then the lane overlay (separated by a divider).
+// CHAT_DIR/lanes/{lane}/. When a lane overlay exists, overlay content
+// appears FIRST (with a clear header), then shared content follows.
+// Under section limits, the full overlay is preserved; shared content
+// is truncated only if needed, with an explicit notice.
 
-function readWithLaneOverlay(basename) {
+function readWithLaneOverlay(basename, maxKey, label) {
 	const shared = read(path.join(CHAT_DIR, basename));
 	const laneFile = path.join(CHAT_DIR, "lanes", lane, basename);
 	const overlay = read(laneFile);
-	if (!overlay) return shared;
-	if (!shared) return overlay;
-	return shared + "\n\n---\n\n" + overlay;
+	const max = MAX[maxKey];
+
+	if (!overlay) return limit(shared, max, label);
+	if (!shared) return limit(overlay, max, `${cfg.sectionPrefix} lane overlay (${label})`);
+
+	// Overlay content appears BEFORE shared content, with clear headers
+	const overlaySection = `### ${cfg.sectionPrefix} — Lane-Specific\n\n${overlay}`;
+	const sharedSection = `### Shared Base\n\n${shared}`;
+	const divider = "\n\n---\n\n";
+
+	// If overlay alone exceeds max, truncate overlay with explicit notice
+	if (overlaySection.length > max) {
+		return limit(overlaySection, max, `${cfg.sectionPrefix} lane overlay (${label})`);
+	}
+
+	// If combined fits entirely, return all
+	const combined = overlaySection + divider + sharedSection;
+	if (combined.length <= max) return combined;
+
+	// Overlay fits; shared base needs truncation.
+	// Preserve full overlay, include as much shared as fits.
+	const truncationNotice = `\n\n[Shared base truncated to fit section limit. Lane overlay preserved in full.]`;
+	const sharedBudget = max - overlaySection.length - divider.length - truncationNotice.length;
+	if (sharedBudget <= 0) {
+		return overlaySection + truncationNotice;
+	}
+	const truncatedShared = sharedSection.slice(0, Math.max(0, sharedBudget)).trimEnd();
+	return overlaySection + divider + truncatedShared + truncationNotice;
 }
 
 const identityPath = path.join(CHAT_DIR, "identity.md");
@@ -180,31 +207,11 @@ const summariesPath = path.join(CHAT_DIR, "summaries.md");
 const playbookPath = path.join(CHAT_DIR, "playbook.md");
 const secondBrainDir = path.join(CHAT_DIR, "second-brain");
 
-const identity = limit(
-	readWithLaneOverlay("identity.md"),
-	MAX.identity,
-	"identity",
-);
-const activeTask = limit(
-	readWithLaneOverlay("active-task.md"),
-	MAX.activeTask,
-	"active task",
-);
-const continuity = limit(
-	readWithLaneOverlay("continuity-capsule.md"),
-	MAX.continuity,
-	"continuity capsule",
-);
-const summaries = limit(
-	readWithLaneOverlay("summaries.md"),
-	MAX.summaries,
-	"summaries",
-);
-const playbook = limit(
-	readWithLaneOverlay("playbook.md"),
-	MAX.playbook,
-	"playbook",
-);
+const identity = readWithLaneOverlay("identity.md", "identity", "identity");
+const activeTask = readWithLaneOverlay("active-task.md", "activeTask", "active task");
+const continuity = readWithLaneOverlay("continuity-capsule.md", "continuity", "continuity capsule");
+const summaries = readWithLaneOverlay("summaries.md", "summaries", "summaries");
+const playbook = readWithLaneOverlay("playbook.md", "playbook", "playbook");
 const secondBrain = buildSecondBrain();
 
 const machineBlock = cfg.machineBlock;
