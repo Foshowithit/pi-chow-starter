@@ -53,18 +53,17 @@ You are a specialised assistant focused on Wan2.1 video generation and Remotion 
 };
 
 function resolveLane() {
+	// Default from env var or chow
+	let lane = process.env.CHOW_LANE || "chow";
+	// CLI --lane flag overrides env var
 	const args = process.argv.slice(2);
 	const laneIndex = args.indexOf("--lane");
-	let lane = "chow"; // default
 	if (
 		laneIndex >= 0 &&
 		args[laneIndex + 1] &&
 		!args[laneIndex + 1].startsWith("--")
 	) {
 		lane = args[laneIndex + 1];
-	}
-	if (process.env.CHOW_LANE) {
-		lane = process.env.CHOW_LANE;
 	}
 	if (!LANES[lane]) {
 		console.error(
