@@ -173,7 +173,8 @@ function readWithLaneOverlay(basename, maxKey, label) {
 	const max = MAX[maxKey];
 
 	if (!overlay) return limit(shared, max, label);
-	if (!shared) return limit(overlay, max, `${cfg.sectionPrefix} lane overlay (${label})`);
+	if (!shared)
+		return limit(overlay, max, `${cfg.sectionPrefix} lane overlay (${label})`);
 
 	// Overlay content appears BEFORE shared content, with clear headers
 	const overlaySection = `### ${cfg.sectionPrefix} — Lane-Specific\n\n${overlay}`;
@@ -182,7 +183,11 @@ function readWithLaneOverlay(basename, maxKey, label) {
 
 	// If overlay alone exceeds max, truncate overlay with explicit notice
 	if (overlaySection.length > max) {
-		return limit(overlaySection, max, `${cfg.sectionPrefix} lane overlay (${label})`);
+		return limit(
+			overlaySection,
+			max,
+			`${cfg.sectionPrefix} lane overlay (${label})`,
+		);
 	}
 
 	// If combined fits entirely, return all
@@ -192,11 +197,14 @@ function readWithLaneOverlay(basename, maxKey, label) {
 	// Overlay fits; shared base needs truncation.
 	// Preserve full overlay, include as much shared as fits.
 	const truncationNotice = `\n\n[Shared base truncated to fit section limit. Lane overlay preserved in full.]`;
-	const sharedBudget = max - overlaySection.length - divider.length - truncationNotice.length;
+	const sharedBudget =
+		max - overlaySection.length - divider.length - truncationNotice.length;
 	if (sharedBudget <= 0) {
 		return overlaySection + truncationNotice;
 	}
-	const truncatedShared = sharedSection.slice(0, Math.max(0, sharedBudget)).trimEnd();
+	const truncatedShared = sharedSection
+		.slice(0, Math.max(0, sharedBudget))
+		.trimEnd();
 	return overlaySection + divider + truncatedShared + truncationNotice;
 }
 
@@ -208,8 +216,16 @@ const playbookPath = path.join(CHAT_DIR, "playbook.md");
 const secondBrainDir = path.join(CHAT_DIR, "second-brain");
 
 const identity = readWithLaneOverlay("identity.md", "identity", "identity");
-const activeTask = readWithLaneOverlay("active-task.md", "activeTask", "active task");
-const continuity = readWithLaneOverlay("continuity-capsule.md", "continuity", "continuity capsule");
+const activeTask = readWithLaneOverlay(
+	"active-task.md",
+	"activeTask",
+	"active task",
+);
+const continuity = readWithLaneOverlay(
+	"continuity-capsule.md",
+	"continuity",
+	"continuity capsule",
+);
 const summaries = readWithLaneOverlay("summaries.md", "summaries", "summaries");
 const playbook = readWithLaneOverlay("playbook.md", "playbook", "playbook");
 const secondBrain = buildSecondBrain();
