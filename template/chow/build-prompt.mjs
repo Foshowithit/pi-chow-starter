@@ -81,7 +81,7 @@ const cfg = LANES[lane];
 const MEMORY_ROOT =
 	process.env.CHOW_MEMORY_ROOT ||
 	DEFAULT_MEMORY_ROOTS.find((root) => {
-		return fs.existsSync(path.join(root, cfg.chatId, "identity.md"));
+		return fs.existsSync(path.join(root, cfg.chatId, "shared", "identity.md"));
 	}) ||
 	cfg.memoryRootDefault;
 
@@ -160,14 +160,17 @@ function section(title, body) {
 }
 
 // ── Lane-specific file overlays ──────────────────────────────────────────
-// Shared base files live in CHAT_DIR. Lane-specific overlays live in
+// Shared base files live in CHAT_DIR/shared/. Lane-specific overlays live in
 // CHAT_DIR/lanes/{lane}/. When a lane overlay exists, overlay content
 // appears FIRST (with a clear header), then shared content follows.
 // Under section limits, the full overlay is preserved; shared content
 // is truncated only if needed, with an explicit notice.
+//
+// For active-task and summaries: these are lane-only (read from lanes/{lane}/
+// only, no shared base).
 
 function readWithLaneOverlay(basename, maxKey, label) {
-	const shared = read(path.join(CHAT_DIR, basename));
+	const shared = read(path.join(CHAT_DIR, "shared", basename));
 	const laneFile = path.join(CHAT_DIR, "lanes", lane, basename);
 	const overlay = read(laneFile);
 	const max = MAX[maxKey];
@@ -208,15 +211,23 @@ function readWithLaneOverlay(basename, maxKey, label) {
 	return overlaySection + divider + truncatedShared + truncationNotice;
 }
 
-const identityPath = path.join(CHAT_DIR, "identity.md");
-const activeTaskPath = path.join(CHAT_DIR, "active-task.md");
-const continuityPath = path.join(CHAT_DIR, "continuity-capsule.md");
-const summariesPath = path.join(CHAT_DIR, "summaries.md");
-const playbookPath = path.join(CHAT_DIR, "playbook.md");
+// Lane-only files (active-task, summaries) — no shared base, read from lanes/{lane}/ only
+function readLaneOnly(basename, maxKey, label) {
+	const laneFile = path.join(CHAT_DIR, "lanes", lane, basename);
+	const content = read(laneFile);
+	const max = MAX[maxKey];
+	return limit(content, max, `${cfg.sectionPrefix} ${label}`);
+}
+
+const identityPath = path.join(CHAT_DIR, "shared", "identity.md");
+const activeTaskPath = path.join(CHAT_DIR, "lanes", lane, "active-task.md");
+const continuityPath = path.join(CHAT_DIR, "shared", "continuity-capsule.md");
+const summariesPath = path.join(CHAT_DIR, "lanes", lane, "summaries.md");
+const playbookPath = path.join(CHAT_DIR, "shared", "playbook.md");
 const secondBrainDir = path.join(CHAT_DIR, "second-brain");
 
 const identity = readWithLaneOverlay("identity.md", "identity", "identity");
-const activeTask = readWithLaneOverlay(
+const activeTask = readLaneOnly(
 	"active-task.md",
 	"activeTask",
 	"active task",
@@ -226,7 +237,7 @@ const continuity = readWithLaneOverlay(
 	"continuity",
 	"continuity capsule",
 );
-const summaries = readWithLaneOverlay("summaries.md", "summaries", "summaries");
+const summaries = readLaneOnly("summaries.md", "summaries", "summaries");
 const playbook = readWithLaneOverlay("playbook.md", "playbook", "playbook");
 const secondBrain = buildSecondBrain();
 
@@ -274,7 +285,7 @@ Write-back rules:
 const laneSpecificNote = (() => {
 	const laneDir = path.join(CHAT_DIR, "lanes", lane);
 	if (fs.existsSync(laneDir)) {
-		return `\n\nLane-specific memory files are available under \`${laneDir}/\` and are overlaid on top of the shared base files.`;
+		return `\n\nLane-specific memory files in \`${laneDir}/\`. Shared base files in \`${CHAT_DIR}/shared/\`. Identity/continuity/playbook: shared base overlaid with lane overlay. Active-task/summaries: lane-only (no shared base).`;
 	}
 	return "";
 })();
