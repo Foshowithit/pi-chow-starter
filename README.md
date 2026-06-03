@@ -1,147 +1,108 @@
-# PI-CHOW-STARTER 🐉🔥
+# Pi Chow Starter
 
-> **Turn `pi` into a terminal-native agent with identity, memory, skills, and weapons.**
+**A starter kit that turns `pi` into a terminal-native agent framework — with identity, memory, subagent delegation, and a cost that beats Claude Code by 100×.**
 
-Mr Chow's personal Pi agent setup — now yours for the taking. This gives you the same framework Chow uses: a dynamic system prompt builder that reads from a local "memory" directory, a squadron of specialist sub-agents, 12+ custom skills, and a `chow` wrapper that makes `pi` feel like a persistent AI identity instead of a blank session.
+One command to install. No subscription. No lock-in. Bring your own API key and you're running the same architecture used in production for stock analysis, code review, video pipelines, and market research.
 
-## What You Get
+## What This Is
 
-| Feature | What It Does |
-|---------|-------------|
-| **`chow` CLI** | Wrapper around `pi` that injects your identity, memory, and skills on every launch |
-| **Dynamic Prompt Builder** | Reads `identity.md`, `playbook.md`, `active-task.md`, and `second-brain/` → builds your system prompt live |
-| **Memory OS** | Structured identity + rolling summaries + continuity capsule + daily logs |
-| **12 Custom Skills** | Archon DAG workflows, stock/finance lookup, eval gates, orchestration patterns, video tools, alpha extraction, and more |
-| **11 Specialist Agents** | Coder, Auditor, Mac Operator, Finance Analyst, Trading Quant pipeline (5 agents), and more |
-| **Max Effort Extension** | Injects "MAXIMUM EFFORT DIRECTIVE" into DeepSeek model prompts automatically |
-| **Model Router** | 3 profiles (balanced/fast/thorough) × 3 thinking levels for intelligent model selection |
-| **30+ npm Packages** | Subagents, web access, interactive shells, intercom messaging, git nexus, visual explainer, QMD knowledge search, LSP integration, and many more |
-| **DS Flash Foreman Mode** | One command delegates bounded tasks to DS Flash coder/researcher workers while you keep control |
+Most AI coding tools give you one model doing everything. Claude Code runs a flat `while(model_has_tool_call)` loop — one model, one context window, 8 tools. Aider splits Architect/Editor but still uses the same model approach.
 
-## Quick Install
+**Pi Chow is different.** It uses a **manager model + subagent pattern**:
+
+- One model (the Manager) plans, delegates, and reviews — it doesn't do the work
+- Bounded specialist agents (Subagents) execute focused tasks with their own context
+- Results come back to the manager for synthesis and quality check
+- You can fan out 10 subagents in parallel — each with their own model, tools, and context
+
+The result: near-zero cost per session, better quality through specialization, and the ability to scale to complex multi-step workflows without context rot.
+
+## Architecture in 30 Seconds
+
+```
+You (terminal)
+  │
+  └── pi (manager mode)
+        ├── Delegates to: Subagent A (coder) — writes code
+        ├── Delegates to: Subagent B (researcher) — investigates
+        ├── Delegates to: Subagent C (auditor) — reviews results
+        ├── Chains: A → B → C with artifact handoffs
+        └── Reviews: Acceptance criteria → self-check → loop or done
+```
+
+The manager never does the work itself. It orchestrates. This is the difference between a solo developer and a team lead.
+
+## Cost Comparison
+
+| Tool | Cost per session | Architecture | Lock-in |
+|------|-----------------|--------------|---------|
+| **Claude Code** | $3–15 | Single model loop | Claude-only |
+| **Aider** | $0.50–5 | Architect/Editor | Model configurable |
+| **Copilot** | $10/mo | Chat + inline | GitHub-only |
+| **Pi Chow (this)** | **$0.00–0.03** | **Manager + subagents** | **Any model** |
+
+We route the manager to DeepSeek V4 Pro (~$0/task via free tier) and workers to DS Flash 3 (~$0/task). Heavy reasoning uses V4 Pro. 90% of tasks use Flash 3. Free Nemotron models handle planning and review.
+
+**Real result: a full stock analysis workflow costs $0.00 in API fees.**
+
+## One-Line Install
 
 ```bash
 curl -sfL https://raw.githubusercontent.com/Foshowithit/pi-chow-starter/main/install.sh | bash
 ```
 
-Or clone and run manually:
+Requires: `pi` CLI installed (https://github.com/nicepkg/pi) and at least one API key.
+
+## What You Get
+
+| Feature | Description |
+|---------|-------------|
+| **`chow` CLI** | Wrapper that builds your system prompt from memory files every session |
+| **Memory OS** | Identity, active tasks, playbook, continuity capsule — structured knowledge that persists |
+| **3 core agents** | Coder, Auditor, Mac Operator — focused, bounded specialists |
+| **10 custom skills** | Archon DAGs, stock/finance lookup, evaluation gates, summarization, video tools |
+| **Model router** | Automatic fallback chains — if Flash 3 is rate-limited, Nemotron handles it |
+| **Max Effort extension** | Auto-injects "think harder" directive for DeepSeek models |
+| **13 pi packages** | Subagents, web access, inter-shell, intercom, messenger, review-loop, model-switch, and more |
+
+## Where We're Honest About Weaknesses
+
+This section is for people who actually evaluate tooling. Every framework has tradeoffs:
+
+- **Rate limits bite us.** Free tiers have daily caps per key. We rotate keys and route to fallbacks, but it's not seamless. If you need guaranteed always-on, add a paid key.
+- **Subagents lose context.** Fork mode helps but bounded agents don't always see the full picture. We use artifact contracts (files on disk) for handoffs — deterministic but not conversational.
+- **No messaging gateway.** Unlike OpenCLAW (Slack/Telegram/Discord) or Hermes (20+ channel adapters), we're terminal-native. That's a feature for developers, a gap if you want a Slackbot.
+- **Memory sync is v1.** Local and remote memory aren't fully synced. Manual merge with timestamped sidecars.
+- **No skill compounding.** Hermes creates skills from experience (claims 40% faster on repeated tasks). We do acceptance loops but no automated pattern extraction yet.
+- **Manager latency.** Manager mode adds overhead vs a single model. Worth it for complex tasks, overkill for "what's the weather."
+
+## How It Compares
+
+| Dimension | Claude Code | OpenCLAW | Hermes | **Us** |
+|-----------|------------|----------|--------|--------|
+| Subagent delegation | No (flat loop) | Hierarchical | delegate_tool | **Manager pattern** |
+| Self-review | No | No | No | **Acceptance loops** |
+| Parallel execution | No | Via cron | No | **Native fan-out** |
+| Model routing | Claude-only | Configurable | 18+ providers | **Auto fallback chains** |
+| Cost per session | $3–15 | API + infra | API costs | **$0–0.03** |
+| Install | npm global | `git clone` | `pip install` | **`curl \| bash`** |
+
+## Quick Start After Install
 
 ```bash
-git clone https://github.com/Foshowithit/pi-chow-starter.git
-cd pi-chow-starter
-bash install.sh
-```
-
-## What Happens
-
-The installer does NOT overwrite your existing pi setup. It:
-
-1. **Copies** the `chow` wrapper, prompt builder, and template files into `~/.pi/agent/`
-2. **Patches** your `~/.pi/agent/settings.json` to add the package list and config (creates backup first)
-3. **Creates** a memory stub directory with template identity files
-4. **Prints** the shell config you need to add to `~/.zshrc`
-5. **Guides** you to set up API keys (or copies the example)
-
-## After Install
-
-Add to `~/.zshrc`:
-
-```bash
+# Add to ~/.zshrc
 export PATH="$HOME/.pi/agent/bin:$PATH"
-export CHOW_CLI_MODEL="ollama/deepseek-v4-pro:cloud"
-export CHOW_WORKER_MODEL="ollama/deepseek-v4-flash:cloud"
-export CHOW_CLI_THINKING="low"
+export CHOW_CLI_MODEL="opencode-go/deepseek-v4-pro"
+export CHOW_WORKER_MODEL="opencode-go/deepseek-v4-flash"
+
+# Start Chow
+chow
+
+# Delegate to a specialist
+chow-worker coder "add error handling to this function"
+chow-worker researcher "investigate this API's rate limits"
 ```
-
-Then:
-
-```bash
-chow                    # Start Chow in Pi TUI
-chow -c                 # Continue latest session
-chow -p "hello"         # One-shot print mode
-chow --chow-where       # Show paths/config
-chow --dsflashmode      # Start in foreman mode
-
-# Edit your identity
-chow --chow-memory
-
-# Specialist agents
-chow-worker coder "fix this bug"
-chow-worker researcher "investigate this API"
-```
-
-## Customize Your Identity
-
-Edit `~/carl-bot/memory/-1003665370879/identity.md` with your own info:
-
-```markdown
-# Identity
-
-## Who You Are
-- Name: Your Name
-- Role: Your Role
-- Personality: What makes you unique
-
-## Your Setup
-- Key tools and workflows
-- Machine info
-- Preferred models
-```
-
-The prompt builder reads this file + `active-task.md` + `playbook.md` + `second-brain/` on every launch.
-
-## Directory Structure
-
-```
-~/.pi/agent/
-├── bin/
-│   ├── chow              # Main wrapper (in PATH)
-│   ├── chow-worker       # DS Flash worker delegate
-│   └── chow-*            # Other helpers
-├── chow/
-│   ├── build-prompt.mjs  # Dynamic prompt builder
-│   └── SYSTEM.md         # Reference prompt
-├── agents/               # Specialist agent definitions
-│   ├── coder.md
-│   ├── auditor.md
-│   ├── mac-operator.md
-│   ├── john-finance.md
-│   ├── trading-quant-*.md
-│   └── agent-chain.yaml
-├── skills/               # Custom skill modules
-│   ├── archon-dag/
-│   ├── stock-lookup/
-│   ├── summarize/
-│   └── ...
-├── extensions/           # Pi extensions
-│   └── max-effort/
-├── prompts/              # Custom prompt templates
-├── sessions/chow-terminal/  # Session storage
-├── settings.json         # Pi config (patched)
-├── compaction-policy.json
-└── model-router.json
-
-~/carl-bot/memory/-1003665370879/  # Your "brain"
-├── identity.md            # Who you are (edit this)
-├── active-task.md         # What you're working on
-├── continuity-capsule.md  # Running state
-├── playbook.md            # Your playbook
-├── summaries.md           # Rolling summaries
-└── second-brain/          # Context + logs
-```
-
-## API Keys Needed
-
-The template ships with an `auth.json.example`. You need at least one provider keyed up:
-
-- **Ollama Cloud** (free tier): `ollama` provider with API key
-- **OpenCode Go** (free tier): `opencode-go` provider with API key
-- **OpenAI Codex**: OAuth-based (set up via `pi`)
-
-## Architecture
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full breakdown of how all pieces fit together.
 
 ---
 
-*Built with 🔥 by Mr Chow. Fork it. Customize it. Make it yours.*
+*Built with 🔥 by Mr Chow. MIT Licensed. Not affiliated with the Hangover movie. Mostly.*

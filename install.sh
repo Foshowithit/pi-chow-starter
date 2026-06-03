@@ -17,6 +17,7 @@ RED='\033[0;31m'
 GOLD='\033[0;33m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GOLD}"
@@ -34,6 +35,7 @@ REPO_ROOT="$SCRIPT_DIR"
 if [ ! -d "$REPO_ROOT/template" ]; then
     # Might be running from temp dir after curl
     TMP_DIR=$(mktemp -d)
+    trap 'rm -rf "$TMP_DIR"' EXIT
     echo -e "${CYAN}📦 Downloading pi-chow-starter...${NC}"
     if command -v git &>/dev/null; then
         git clone --depth=1 https://github.com/Foshowithit/pi-chow-starter.git "$TMP_DIR/repo" 2>/dev/null || {
@@ -230,25 +232,13 @@ if command -v node &>/dev/null; then
         'npm:pi-interactive-shell',
         'npm:pi-intercom',
         'npm:pi-messenger',
-        'npm:pi-boomerang',
         'npm:pi-review-loop',
         'npm:pi-model-switch',
-        'npm:pi-powerline-footer',
-        'npm:pi-annotate',
-        'npm:pi-tool-display',
-        'npm:pi-hashline-edit',
         'npm:pi-qmd',
         'npm:pi-context-prune',
         'npm:pi-goal',
-        'npm:pi-mermaid',
-        'npm:pi-gitnexus',
-        'npm:pi-lsp-extension',
-        'npm:pi-session-merge',
-        'npm:pi-zerg-swarm',
-        'npm:pi-stock-ticker',
-        'npm:pi-model-router',
         'npm:pi-custom-compaction',
-        'npm:pi-rtk-optimizer',
+        'npm:pi-stock-ticker',
         'npm:visual-explainer',
     ];
 
@@ -333,7 +323,6 @@ echo -e "${CYAN}   # ----- Pi Chow Starter -----${NC}"
 echo "   export PATH=\"\$HOME/.pi/agent/bin:\$PATH\""
 echo "   export CHOW_CLI_MODEL=\"ollama/deepseek-v4-pro:cloud\""
 echo "   export CHOW_WORKER_MODEL=\"ollama/deepseek-v4-flash:cloud\""
-echo "   export CHOW_CLI_THINKING=\"low\""
 echo ""
 
 # ---- Summary ----

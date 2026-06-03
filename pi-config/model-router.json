@@ -4,22 +4,20 @@
   "profiles": {
     "balanced": {
       "high": {
-        "model": "openai-codex/gpt-5.5",
-        "thinking": "off"
+        "model": "opencode-go/deepseek-v4-pro",
+        "thinking": "high"
       },
       "medium": {
         "model": "opencode-go/deepseek-v4-flash",
-        "thinking": "high"
+        "thinking": "medium"
       },
       "low": {
-        "model": "openrouter-direct/openrouter/free",
+        "model": "opencode/nemotron-3-super-free",
         "thinking": "off"
       },
       "fallbackModels": [
         "opencode-go/deepseek-v4-flash",
         "opencode-go/deepseek-v4-pro",
-        "openrouter-direct/deepseek/deepseek-v4-flash",
-        "openrouter-direct/openrouter/free",
         "opencode/nemotron-3-super-free"
       ]
     },
@@ -29,61 +27,39 @@
         "thinking": "high"
       },
       "medium": {
-        "model": "openrouter-direct/openrouter/free",
+        "model": "opencode/nemotron-3-super-free",
         "thinking": "off"
       },
       "low": {
-        "model": "openrouter-direct/openrouter/free",
+        "model": "opencode/nemotron-3-super-free",
         "thinking": "off"
       },
       "fallbackModels": [
         "opencode-go/deepseek-v4-flash",
         "opencode-go/deepseek-v4-pro",
-        "openrouter-direct/deepseek/deepseek-v4-flash",
-        "openrouter-direct/openrouter/free",
         "opencode/nemotron-3-super-free"
       ]
     },
     "thorough": {
       "high": {
-        "model": "openai-codex/gpt-5.5",
-        "thinking": "off"
+        "model": "opencode-go/deepseek-v4-pro",
+        "thinking": "high"
       },
       "medium": {
         "model": "opencode-go/deepseek-v4-flash",
-        "thinking": "high"
+        "thinking": "medium"
       },
       "low": {
-        "model": "openrouter-direct/openrouter/free",
+        "model": "opencode/nemotron-3-super-free",
         "thinking": "off"
       },
       "fallbackModels": [
         "opencode-go/deepseek-v4-flash",
         "opencode-go/deepseek-v4-pro",
-        "openrouter-direct/deepseek/deepseek-v4-flash",
-        "openrouter-direct/openrouter/free",
         "opencode/nemotron-3-super-free"
       ]
     }
   },
-  "routerModel": "opencode-go/mimo-v2.5",
-  "routerThinking": "off",
-  "zenPool": {
-    "providers": [
-      "opencode",
-      "opencode-zen2",
-      "opencode-zen3"
-    ],
-    "models": [
-      "opencode-go/big-pickle",
-      "opencode/mimo-v2.5-free",
-      "opencode/nemotron-3-super-free",
-      "opencode-zen2/big-pickle",
-      "opencode-zen2/mimo-v2.5-free",
-      "opencode-zen2/nemotron-3-super-free",
-      "opencode-zen3/big-pickle",
-      "opencode-zen3/mimo-v2.5-free",
-      "opencode-zen3/nemotron-3-super-free"
-    ]
-  }
+  "routerModel": "opencode-go/deepseek-v4-flash",
+  "routerThinking": "off"
 }
