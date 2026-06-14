@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Chow Checkpoint — capture and replay session state
+SCRIPT="$HOME/.pi/agent/chow-memory-v2/scripts/checkpoint.py"
+
+if [ ! -f "$SCRIPT" ]; then
+  echo "Chow Memory OS v2 not installed. Run the full installer first."
+  exit 1
+fi
+
+if [ $# -eq 0 ]; then
+    exec python3 "$SCRIPT" --latest
+else
+    exec python3 "$SCRIPT" "$@"
+fi

@@ -1,54 +1,33 @@
 {
-  "lastChangelogVersion": "0.78.0",
-  "defaultProvider": "opencode",
-  "defaultModel": "deepseek-v4-pro",
-  "defaultThinkingLevel": "high",
-  "providers": {
-    "ollama": {},
-    "opencode-go": {},
-    "opencode": {}
-  },
-  "compaction": {
-    "enabled": true,
-    "reserveTokens": 16384,
-    "keepRecentTokens": 25000
-  },
+  "provider": "opencode-go",
+  "model": "deepseek-v4-pro",
+  "thinking": "high",
   "enabledModels": [
-    "openrouter-direct/openrouter/free",
-    "openrouter-direct/deepseek/deepseek-v4-flash",
-    "openrouter-direct/nvidia/nemotron-3-super-120b-a12b:free",
-    "openrouter-direct/openai/gpt-oss-120b:free",
-    "opencode/nemotron-3-super-free",
-    "opencode-zen2/nemotron-3-super-free",
-    "opencode-zen3/nemotron-3-super-free",
-    "opencode-zen4/nemotron-3-super-free",
-    "opencode/big-pickle",
-    "opencode-zen2/big-pickle",
-    "opencode/deepseek-v4-flash-free",
-    "opencode-go/deepseek-v4-flash",
     "opencode-go/deepseek-v4-pro",
-    "ollama/glm-5.1:cloud",
-    "ollama/gemini-3-flash-preview:cloud"
+    "opencode-go/deepseek-v4-flash",
+    "ollama/deepseek-v4-pro:cloud",
+    "ollama/deepseek-v4-flash:cloud",
+    "ollama2/glm-5.1:cloud",
+    "ollama2/gemini-3-flash-preview:cloud",
+    "opencode/nemotron-3-super-free",
+    "opencode-go/mimo-v2.5",
+    "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+    "openrouter/openai/gpt-oss-120b:free"
   ],
   "packages": [
-    "npm:pi-subagents",
-    "npm:pi-web-access",
-    "npm:pi-interactive-shell",
-    "npm:pi-intercom",
-    "npm:pi-messenger",
-    "npm:pi-review-loop",
-    "npm:pi-model-switch",
-    "npm:pi-qmd",
-    "npm:pi-context-prune",
-    "npm:pi-goal",
-    "npm:pi-custom-compaction",
-    "npm:pi-stock-ticker",
-    "npm:visual-explainer"
+    "pi-subagents", "pi-web-access", "pi-interactive-shell",
+    "pi-intercom", "pi-messenger", "pi-review-loop",
+    "pi-model-switch", "pi-qmd", "pi-context-prune",
+    "pi-goal", "pi-custom-compaction", "pi-stock-ticker",
+    "pi-visual-explainer"
   ],
-  "showHardwareCursor": true,
-  "autocompleteMaxVisible": 15,
-  "terminal": {
-    "showTerminalProgress": true
+  "compaction": {
+    "enabled": true,
+    "reserve": 16000,
+    "keepRecent": 25000
   },
-  "theme": "light"
+  "terminal": {
+    "theme": "light",
+    "showTokens": false
+  }
 }

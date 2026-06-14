@@ -1,16 +1,12 @@
-# ----- Pi Chow Starter -----
-# Add to ~/.zshrc or ~/.bashrc
-
-# Add chow CLI to PATH
+# Pi Chow shell config — add to ~/.zshrc or ~/.bashrc
 export PATH="$HOME/.pi/agent/bin:$PATH"
 
-# Default model for main Chow sessions (use pro for thinking, flash for speed)
-export CHOW_CLI_MODEL="ollama/deepseek-v4-pro:cloud"
-
-# Worker model for chow-worker delegation (use flash for speed/cost)
-export CHOW_WORKER_MODEL="ollama/deepseek-v4-flash:cloud"
-
-# Default thinking level (high, low, off)
+# Model configuration
+export CHOW_CLI_MODEL="opencode-go/deepseek-v4-pro"
+export CHOW_WORKER_MODEL="opencode-go/deepseek-v4-flash"
 export CHOW_CLI_THINKING="low"
 
-# Pi auth lives in ~/.pi/agent/auth.json — do not hard-code API keys here.
+# Lane: chow, hector, or terminal-chow
+# export CHOW_LANE="chow"
+
+# API keys are stored in ~/.pi/agent/auth.json — never in shell configs

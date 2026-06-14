@@ -1,19 +1,12 @@
 {
   "enabled": true,
-  "trigger": {
-    "maxTokens": 55000,
-    "minTokens": 40000,
-    "cooldownMs": 60000
+  "maxTokens": 55000,
+  "minTokens": 40000,
+  "cooldownSec": 60,
+  "summaryRetention": 25000,
+  "models": {
+    "summary": "opencode-go/deepseek-v4-flash",
+    "fallback": "ollama/deepseek-v4-flash:cloud"
   },
-  "summaryRetention": {
-    "mode": "tokens",
-    "value": 25000
-  },
-  "ui": {
-    "name": "ctx"
-  },
-  "models": [
-    { "model": "ollama/deepseek-v4-flash:cloud", "thinkingLevel": "low" },
-    { "model": "ollama/glm-5.1:cloud", "thinkingLevel": "low" }
-  ]
+  "thinking": "low"
 }

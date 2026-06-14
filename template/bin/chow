@@ -1,186 +1,201 @@
 #!/usr/bin/env bash
+#
+# chow — Launch an agent session with a generated system prompt.
+#
+# Reads lane-specific memory, builds a combined prompt via
+# build-prompt.mjs, then launches pi with the appropriate model
+# flags, tools, and session directory.
+#
+# Environment variables (all optional):
+#   CHOW_LANE          Lane name (chow|hector|terminal-chow)
+#   CHOW_CLI_MODEL     CLI agent model (default: opencode-go/deepseek-v4-pro)
+#   CHOW_WORKER_MODEL  Worker model (default: opencode-go/deepseek-v4-flash)
+#
+# Flags:
+#   --dsflashmode     Enable deep-search flash mode (sets DSFLASHMODE=1)
+#   --manager-mode    Enable manager-mode tools (subagent, intercom, ...)
+#   --lane <name>     Override CHOW_LANE
+#
 set -euo pipefail
 
-PI_BIN="${PI_BIN:-$HOME/.local/share/pi-node/current/bin/pi}"
-NODE_BIN="${NODE_BIN:-node}"
-PROMPT_BUILDER="$HOME/.pi/agent/chow/build-prompt.mjs"
-SESSION_DIR="${CHOW_CLI_SESSION_DIR:-$HOME/.pi/agent/sessions/chow-terminal}"
-GENERATED_PROMPT="$HOME/.pi/agent/chow/SYSTEM.generated.md"
-AUTH_FILE="$HOME/.pi/agent/auth.json"
-
-# Manager mode: orchestrator gets delegation-only tools (no bash/read/write/edit/search).
-# Subagents (DS Flash workers) handle all execution.
-MANAGER_TOOLS="subagent,intercom,switch_model,pi_messenger,analyze_image,structured_return,review_loop"
-
-
-# Adam preference: Chow manager/high-reasoning defaults to DS V4 Pro on OpenCode-Go; workers stay DS V4 Flash.
-if [[ -z "${CHOW_CLI_MODEL:-}" ]]; then
-  export CHOW_CLI_MODEL="opencode-go/deepseek-v4-pro"
+# --- Paths ----------------------------------------------------------------
+PI_BIN="$(command -v pi 2>/dev/null || true)"
+if [[ -z "$PI_BIN" ]]; then
+  for try in /usr/local/bin/pi ~/.local/bin/pi ~/.pi/pi; do
+    [[ -x "$try" ]] && { PI_BIN="$try"; break; }
+  done
 fi
-if [[ -z "${CHOW_WORKER_MODEL:-}" ]]; then
-  export CHOW_WORKER_MODEL="opencode-go/deepseek-v4-flash"
-fi
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
+TEMPLATE_DIR="$(cd "$SCRIPT_DIR/../chow" 2>/dev/null && pwd || echo "$SCRIPT_DIR/../chow")"
+
+PROMPT_BUILDER="${TEMPLATE_DIR}/build-prompt.mjs"
+SESSION_DIR="${HOME}/.pi/agent/chow-memory-v2"
+GENERATED_PROMPT="${SESSION_DIR}/SYSTEM.generated.md"
+AUTH_FILE="${SESSION_DIR}/auth.json"
+
+# --- Defaults --------------------------------------------------------------
+CHOW_CLI_MODEL="${CHOW_CLI_MODEL:-opencode-go/deepseek-v4-pro}"
+CHOW_WORKER_MODEL="${CHOW_WORKER_MODEL:-opencode-go/deepseek-v4-flash}"
+LANE="${CHOW_LANE:-chow}"
+DSFLASHMODE=0
+MANAGER_MODE=0
+
+# --- Usage -----------------------------------------------------------------
 usage() {
-  cat <<'EOF'
-chow — Mr Chow as a terminal-native Pi CLI
+  cat <<'USAGE_EOF'
+Usage: chow [options]
 
-Usage:
-  chow                         Start a new interactive Chow/Pi session
-  chow -c                      Continue latest Chow session
-  chow -r                      Pick an old Chow session to resume
-  chow -p "message"             One-shot print mode
-  chow "initial prompt"         Start interactive with initial prompt
+Launch an agent session with a lane-specific system prompt built from
+memory files and checkpoints.
 
-Chow helper commands:
-  chow --chow-help             Show this help
-  chow --chow-prompt           Print the generated Chow system prompt
-  chow --chow-prompt-file      Rebuild ~/.pi/agent/chow/SYSTEM.generated.md
-  chow --chow-memory           Open Chow's local identity memory in $EDITOR
-  chow --chow-where            Show paths/config used by this wrapper
-  chow --dsflashmode [args...]  Start Chow in foreman mode with DS Flash worker helpers
-  chow --manager-mode [args...] Manager mode: orchestrator delegates ALL actions to subagents
-  chow-see [question]         Screenshot current screen and ask Chow vision about it
-  chow-see-say [question]     Screenshot current screen, answer, and speak it aloud
-  chow-say "text"             Speak text aloud using macOS say
-  chow-talk [--screen --speak] Voice input via local Whisper; optional screen+spoken answer
-  chow-ears [--ask|--do]     Push-to-talk local transcript primitive
-  chow-clicky                Simple GUI launcher/hotkey wrapper for desktop assist
-  chow-mission               Voice-first intent router / mission command center
-  chow-ptt start|stop        Hold-to-talk primitive for hotkey press/release
-  chow-grid                   Screenshot with click-coordinate grid overlay
-  chow-perceive --json        Structured JSON screen state for model-independent desktop assist
-  chow-act click X Y          Guarded UI actions: click/type/key/hotkey with confirmation
-  chow-do "question"          Structured-perception guarded one-action planner
-  chow-brain-do "question"    Explicit perceive → planner → action command
-  chow-assist                   Unified terminal loop: ask/do/loop/doctor
+Options:
+  --help             Show this help text and exit.
+  --dsflashmode      Enable deep-search flash mode (DSFLASHMODE=1).
+  --manager-mode     Enable manager-mode tools (subagent, intercom,
+                     switch_model, pi_messenger, analyze_image,
+                     structured_return, review_loop).
+  --lane <name>      Lane to use (chow|hector|terminal-chow).
 
-Useful env overrides:
-  CHOW_CLI_MODEL=provider/model       Override model, otherwise use normal pi defaults
-  CHOW_CLI_PROVIDER=name              Optional provider override
-  CHOW_CLI_THINKING=high              Optional thinking override
-  CHOW_CLI_SESSION_DIR=/path          Session storage override
-  CHOW_DSFLASH_MODE=1                 Enable DS Flash worker-mode prompt
-  CHOW_MANAGER_MODE=1                 Manager mode: orchestrator only delegates, never executes directly
-  CHOW_WORKER_MODEL=provider/model    Worker model (default opencode-go/deepseek-v4-flash)
-  CHOW_MEMORY_ROOT=/path/to/memory    Memory mirror override
-  CHOW_CHAT_ID=-1003665370879         Chow memory lane override
+Environment:
+  CHOW_LANE         Lane override (default: chow).
+  CHOW_CLI_MODEL    CLI model (default: opencode-go/deepseek-v4-pro).
+  CHOW_WORKER_MODEL Worker model (default: opencode-go/deepseek-v4-flash).
 
-All normal pi flags still work: /new, /resume, --session, --fork, --model, --tools, etc.
-EOF
+Lanes:
+  chow          Mr Chow terminal agent - friendly, contextual, memory-rich.
+  hector        Dell WSL2 GPU agent - performance-focused, hardware-aware.
+  terminal-chow Isolated terminal - minimal personality, clean slate.
+
+Examples:
+  chow                        # default lane
+  chow --dsflashmode          # deep-search flash mode
+  chow --manager-mode         # orchestration tools
+  chow --lane hector          # Dell WSL2 lane
+  CHOW_LANE=terminal-chow chow
+USAGE_EOF
 }
 
-if [[ "${1:-}" == "--dsflashmode" ]]; then
-  export CHOW_DSFLASH_MODE=1
-  shift
-fi
+# --- Parse flags -----------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help)
+      usage; exit 0 ;;
+    --dsflashmode)
+      DSFLASHMODE=1; shift ;;
+    --manager-mode)
+      MANAGER_MODE=1; shift ;;
+    --lane)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --lane requires an argument" >&2; exit 1
+      fi
+      LANE="$2"; shift 2 ;;
+    *)
+      echo "ERROR: Unknown option: $1" >&2
+      usage >&2; exit 1 ;;
+  esac
+done
 
-if [[ "${1:-}" == "--manager-mode" ]]; then
-  export CHOW_MANAGER_MODE=1
-  shift
-fi
-
-case "${1:-}" in
-  --chow-help)
-    usage
-    exit 0
-    ;;
-  --chow-prompt)
-    exec "$NODE_BIN" "$PROMPT_BUILDER"
-    ;;
-  --chow-prompt-file)
-    "$NODE_BIN" "$PROMPT_BUILDER" --write "$GENERATED_PROMPT" >/dev/null
-    echo "$GENERATED_PROMPT"
-    exit 0
-    ;;
-  --chow-memory)
-    chat_id="${CHOW_CHAT_ID:--1003665370879}"
-    root="${CHOW_MEMORY_ROOT:-$HOME/carl-bot/memory}"
-    mkdir -p "$root/$chat_id"
-    touch "$root/$chat_id/identity.md"
-    exec "${EDITOR:-vi}" "$root/$chat_id/identity.md"
-    ;;
-  --chow-where)
-    echo "pi:             $PI_BIN"
-    echo "prompt builder: $PROMPT_BUILDER"
-    echo "session dir:    $SESSION_DIR"
-    echo "memory root:    ${CHOW_MEMORY_ROOT:-$HOME/carl-bot/memory}"
-    echo "chat id:        ${CHOW_CHAT_ID:--1003665370879}"
-    echo "model override: ${CHOW_CLI_MODEL:-<pi default>}"
-    echo "provider over.: ${CHOW_CLI_PROVIDER:-<pi default>}"
-    echo "thinking over.: ${CHOW_CLI_THINKING:-<pi default>}"
-    echo "ds flash mode: ${CHOW_DSFLASH_MODE:-0}"
-    echo "manager mode:  ${CHOW_MANAGER_MODE:-0}"
-    echo "worker model:  ${CHOW_WORKER_MODEL:-opencode-go/deepseek-v4-flash}"
-    exit 0
-    ;;
+# --- Validate lane ---------------------------------------------------------
+case "$LANE" in
+  chow|hector|terminal-chow) ;;
+  *)
+    echo "ERROR: Invalid lane '$LANE'. Must be one of: chow, hector, terminal-chow." >&2
+    exit 1 ;;
 esac
 
-mkdir -p "$SESSION_DIR" "$HOME/.pi/agent/chow"
-# opencode-go / zen pools resolve from auth.json, so bridge them here
-if [[ -z "${OPENCODE_API_KEY:-}" && -f "$AUTH_FILE" ]]; then
-  OPENCODE_API_KEY="$($NODE_BIN -e 'const fs=require("fs"); const p=process.argv[1]; const j=JSON.parse(fs.readFileSync(p,"utf8")); process.stdout.write(j["opencode-go"]?.key || "")' "$AUTH_FILE")"
-  if [[ -n "$OPENCODE_API_KEY" ]]; then
-    export OPENCODE_API_KEY
-  fi
-fi
-if [[ -z "${OPENCODE_ZEN2_API_KEY:-}" && -f "$AUTH_FILE" ]]; then
-  OPENCODE_ZEN2_API_KEY="$($NODE_BIN -e 'const fs=require("fs"); const p=process.argv[1]; const j=JSON.parse(fs.readFileSync(p,"utf8")); process.stdout.write(j["opencode-zen2"]?.key || "")' "$AUTH_FILE")"
-  if [[ -n "$OPENCODE_ZEN2_API_KEY" ]]; then
-    export OPENCODE_ZEN2_API_KEY
-  fi
-fi
-if [[ -z "${OPENCODE_ZEN3_API_KEY:-}" && -f "$AUTH_FILE" ]]; then
-  OPENCODE_ZEN3_API_KEY="$($NODE_BIN -e 'const fs=require("fs"); const p=process.argv[1]; const j=JSON.parse(fs.readFileSync(p,"utf8")); process.stdout.write(j["opencode-zen3"]?.key || "")' "$AUTH_FILE")"
-  if [[ -n "$OPENCODE_ZEN3_API_KEY" ]]; then
-    export OPENCODE_ZEN3_API_KEY
-  fi
-fi
-"$NODE_BIN" "$PROMPT_BUILDER" --write "$GENERATED_PROMPT" >/dev/null
-SYSTEM_PROMPT="$(cat "$GENERATED_PROMPT")"
-PI_ARGS=(--session-dir "$SESSION_DIR" --system-prompt "$SYSTEM_PROMPT")
-if [[ -n "${CHOW_CLI_PROVIDER:-}" ]]; then
-  PI_ARGS+=(--provider "$CHOW_CLI_PROVIDER")
-fi
-if [[ -n "${CHOW_CLI_MODEL:-}" ]]; then
-  PI_ARGS+=(--model "$CHOW_CLI_MODEL")
-fi
-if [[ -n "${CHOW_CLI_THINKING:-}" ]]; then
-  PI_ARGS+=(--thinking "$CHOW_CLI_THINKING")
-fi
-# Manager mode: restrict orchestrator to delegation-only tools
-if [[ "${CHOW_MANAGER_MODE:-0}" == "1" ]]; then
-  PI_ARGS+=(--tools "$MANAGER_TOOLS")
+# --- Read auth file and export API key env vars ----------------------------
+# The auth file is a key=value store. Each recognized key sets an
+# environment variable that pi uses for credential resolution.
+if [[ -f "$AUTH_FILE" ]]; then
+  while IFS='=' read -r key value; do
+    # Skip blank lines and comments
+    [[ -z "$key" || "$key" == '#'* ]] && continue
+    # Trim leading/trailing whitespace
+    key="$(echo "$key" | xargs)"
+    value="$(echo "$value" | xargs)"
+    case "$key" in
+      OPENCODE_GO_API_KEY|OPencode_GO_key|opencode-go)
+        export OPENCODE_GO_API_KEY="$value" ;;
+      OPENCODE_ZEN2_API_KEY|OPencode_ZEN2_key|opencode-zen2)
+        export OPENCODE_ZEN2_API_KEY="$value" ;;
+      OPENCODE_ZEN3_API_KEY|OPencode_ZEN3_key|opencode-zen3)
+        export OPENCODE_ZEN3_API_KEY="$value" ;;
+      OPENCODE_ZEN4_API_KEY|OPencode_ZEN4_key|opencode-zen4)
+        export OPENCODE_ZEN4_API_KEY="$value" ;;
+      OPENROUTER_API_KEY|OPENROUTER_key|openrouter)
+        export OPENROUTER_API_KEY="$value" ;;
+      OLLAMA_API_KEY|OLLAMA_key|ollama)
+        export OLLAMA_API_KEY="$value" ;;
+      OLLAMA2_API_KEY|OLLAMA2_key|ollama2)
+        export OLLAMA2_API_KEY="$value" ;;
+    esac
+  done < "$AUTH_FILE"
 fi
 
-# opencode-zen4 bridge
-if [[ -z "${OPENCODE_ZEN4_API_KEY:-}" && -f "$AUTH_FILE" ]]; then
-  OPENCODE_ZEN4_API_KEY="$($NODE_BIN -e 'const fs=require("fs"); const p=process.argv[1]; const j=JSON.parse(fs.readFileSync(p,"utf8")); process.stdout.write(j["opencode-zen4"]?.key || "")' "$AUTH_FILE")"
-  if [[ -n "$OPENCODE_ZEN4_API_KEY" ]]; then
-    export OPENCODE_ZEN4_API_KEY
-  fi
+# --- Ensure session dir exists ---------------------------------------------
+mkdir -p "$SESSION_DIR"
+
+# --- Assemble model flags -------------------------------------------------
+MODEL_FLAGS=(--model "$CHOW_CLI_MODEL" --worker-model "$CHOW_WORKER_MODEL")
+if [[ "$DSFLASHMODE" -eq 1 ]]; then
+  MODEL_FLAGS+=(--dsflashmode)
 fi
 
-# openrouter bridge
-if [[ -z "${OPENROUTER_API_KEY:-}" && -f "$AUTH_FILE" ]]; then
-  OPENROUTER_API_KEY="$($NODE_BIN -e 'const fs=require("fs"); const p=process.argv[1]; const j=JSON.parse(fs.readFileSync(p,"utf8")); process.stdout.write(j["openrouter"]?.key || "")' "$AUTH_FILE")"
-  if [[ -n "$OPENROUTER_API_KEY" ]]; then
-    export OPENROUTER_API_KEY
-  fi
+# --- Tools list ------------------------------------------------------------
+if [[ "$MANAGER_MODE" -eq 1 ]]; then
+  # Manager mode: high-level orchestration tools only — agent spawning,
+  # inter-agent messaging, model switching, analysis, structured returns.
+  TOOLS="--tools subagent,intercom,switch_model,pi_messenger,analyze_image,structured_return,review_loop"
+else
+  # Full default tool set — all editing, browsing, memory, inter-agent
+  # communication, supervisor contact, and notification capabilities.
+  TOOLS="--tools bash,file_editor,read,write,edit,grep,glob,gather,web_fetch,memory,intercom,contact_supervisor,notify,structured_return,review_loop,pi_messenger,analyze_image"
 fi
 
-
-# ollama premium bridge
-if [[ -z "${OLLAMA_API_KEY:-}" && -f "$AUTH_FILE" ]]; then
-  OLLAMA_API_KEY="$($NODE_BIN -e 'const fs=require("fs"); const p=process.argv[1]; const j=JSON.parse(fs.readFileSync(p,"utf8")); process.stdout.write(j["ollama"]?.key || "")' "$AUTH_FILE")"
-  if [[ -n "$OLLAMA_API_KEY" ]]; then
-    export OLLAMA_API_KEY
-  fi
-fi
-if [[ -z "${OLLAMA2_API_KEY:-}" && -f "$AUTH_FILE" ]]; then
-  OLLAMA2_API_KEY="$($NODE_BIN -e 'const fs=require("fs"); const p=process.argv[1]; const j=JSON.parse(fs.readFileSync(p,"utf8")); process.stdout.write(j["ollama2"]?.key || j["ollama-premium2"]?.key || "")' "$AUTH_FILE")"
-  if [[ -n "$OLLAMA2_API_KEY" ]]; then
-    export OLLAMA2_API_KEY
-  fi
+# --- Build system prompt via build-prompt.mjs ------------------------------
+if [[ ! -f "$PROMPT_BUILDER" ]]; then
+  echo "ERROR: Prompt builder not found at $PROMPT_BUILDER" >&2
+  exit 1
 fi
 
-exec "$PI_BIN" "${PI_ARGS[@]}" "$@"
+# Export context for the Node.js builder
+export CHOW_LANE="$LANE"
+export DSFLASHMODE
+export MANAGER_MODE
+
+BUILDER_FLAGS=(--write "$GENERATED_PROMPT")
+if [[ "$MANAGER_MODE" -eq 1 ]]; then
+  BUILDER_FLAGS+=(--manager-mode)
+fi
+
+echo "=== chow: Building prompt for lane '$LANE' ===" >&2
+if ! node "$PROMPT_BUILDER" "${BUILDER_FLAGS[@]}"; then
+  echo "ERROR: Prompt builder failed." >&2
+  exit 1
+fi
+if [[ ! -f "$GENERATED_PROMPT" ]]; then
+  echo "ERROR: Prompt builder did not produce $GENERATED_PROMPT" >&2
+  exit 1
+fi
+
+# --- Checkpoint handling ---------------------------------------------------
+CHECKPOINT_FILE="${SESSION_DIR}/checkpoints/latest.md"
+SESSION_ARGS=()
+if [[ -f "$CHECKPOINT_FILE" && -s "$CHECKPOINT_FILE" ]]; then
+  SESSION_ARGS+=(--checkpoint "$CHECKPOINT_FILE")
+fi
+
+# --- Launch pi -------------------------------------------------------------
+if [[ -z "$PI_BIN" ]]; then
+  echo "ERROR: pi binary not found. Please install pi or add it to PATH." >&2
+  exit 1
+fi
+
+echo "=== chow: Launching pi (lane: $LANE) ===" >&2
+exec "$PI_BIN" \
+  "${MODEL_FLAGS[@]}" \
+  --session-dir "$SESSION_DIR" \
+  $TOOLS \
+  --prompt "$GENERATED_PROMPT" \
+  "${SESSION_ARGS[@]}"

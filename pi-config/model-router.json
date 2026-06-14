@@ -1,65 +1,40 @@
 {
-  "defaultProfile": "balanced",
-  "debug": false,
   "profiles": {
     "balanced": {
-      "high": {
-        "model": "opencode-go/deepseek-v4-pro",
-        "thinking": "high"
-      },
-      "medium": {
-        "model": "opencode-go/deepseek-v4-flash",
-        "thinking": "medium"
-      },
-      "low": {
-        "model": "opencode/nemotron-3-super-free",
-        "thinking": "off"
-      },
-      "fallbackModels": [
-        "opencode-go/deepseek-v4-flash",
-        "opencode-go/deepseek-v4-pro",
-        "opencode/nemotron-3-super-free"
-      ]
+      "high": "opencode-go/deepseek-v4-pro",
+      "medium": "opencode-go/deepseek-v4-flash",
+      "low": "opencode-go/deepseek-v4-flash"
     },
     "fast": {
-      "high": {
-        "model": "opencode-go/deepseek-v4-flash",
-        "thinking": "high"
-      },
-      "medium": {
-        "model": "opencode/nemotron-3-super-free",
-        "thinking": "off"
-      },
-      "low": {
-        "model": "opencode/nemotron-3-super-free",
-        "thinking": "off"
-      },
-      "fallbackModels": [
-        "opencode-go/deepseek-v4-flash",
-        "opencode-go/deepseek-v4-pro",
-        "opencode/nemotron-3-super-free"
-      ]
+      "high": "opencode-go/deepseek-v4-flash",
+      "medium": "opencode-go/deepseek-v4-flash",
+      "low": "opencode-go/deepseek-v4-flash"
     },
     "thorough": {
-      "high": {
-        "model": "opencode-go/deepseek-v4-pro",
-        "thinking": "high"
-      },
-      "medium": {
-        "model": "opencode-go/deepseek-v4-flash",
-        "thinking": "medium"
-      },
-      "low": {
-        "model": "opencode/nemotron-3-super-free",
-        "thinking": "off"
-      },
-      "fallbackModels": [
-        "opencode-go/deepseek-v4-flash",
-        "opencode-go/deepseek-v4-pro",
-        "opencode/nemotron-3-super-free"
-      ]
+      "high": "opencode-go/deepseek-v4-pro",
+      "medium": "opencode-go/deepseek-v4-pro",
+      "low": "opencode-go/deepseek-v4-flash"
     }
   },
-  "routerModel": "opencode-go/deepseek-v4-flash",
-  "routerThinking": "off"
+  "defaultProfile": "balanced",
+  "routes": {
+    "code": { "tier": "high", "profile": "balanced" },
+    "research": { "tier": "medium", "profile": "balanced" },
+    "review": { "tier": "low", "profile": "fast" },
+    "plan": { "tier": "high", "profile": "thorough" },
+    "vision": { "tier": "medium", "profile": "balanced" }
+  },
+  "fallbacks": {
+    "opencode-go/deepseek-v4-pro": ["opencode-go/deepseek-v4-flash", "ollama/deepseek-v4-pro:cloud"],
+    "opencode-go/deepseek-v4-flash": ["ollama/deepseek-v4-flash:cloud", "openrouter/deepseek/deepseek-v4-flash"]
+  },
+  "zenPool": {
+    "enabled": true,
+    "pools": [
+      { "name": "primary", "providers": ["opencode-go", "opencode"], "models": ["deepseek-v4-pro", "deepseek-v4-flash"] },
+      { "name": "fallback", "providers": ["ollama", "ollama2"], "models": ["deepseek-v4-pro:cloud", "nemotron-3-super:cloud"] },
+      { "name": "emergency", "providers": ["openrouter"], "models": ["nvidia/nemotron-3-super-120b-a12b:free"] }
+    ]
+  },
+  "debug": false
 }

@@ -1,392 +1,417 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+/**
+ * build-prompt.mjs — Assemble a lane-specific system prompt from memory files.
+ *
+ * Reads identity, active task, continuity capsule, summaries, playbook,
+ * second-brain context, and checkpoints; redacts secrets; applies per-section
+ * character limits; and writes a combined SYSTEM.generated.md.
+ *
+ * Usage:
+ *   node build-prompt.mjs [--write <path>] [--manager-mode]
+ *
+ * Environment:
+ *   CHOW_LANE                   Lane name (chow|hector|terminal-chow)
+ *   CHOW_PROMPT_CHECKPOINTS_CHARS  Max chars for checkpoints (default 8000)
+ *   MANAGER_MODE                When set, strips terminal/file-direct-use hints
+ */
 
-const HOME = os.homedir();
+import { readFile, writeFile, access } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join, basename } from "node:path";
+import { homedir } from "node:os";
+import { env, argv, exit, stdout } from "node:process";
 
-const DEFAULT_MEMORY_ROOTS = [
-	path.join(HOME, "carl-bot", "memory"),
-	path.join(HOME, "hector-telegram-bot", "memory"),
-];
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+const HOME = homedir();
+const SESSION_DIR = join(HOME, ".pi", "agent", "chow-memory-v2");
+const OUTPUT_PATH_DEFAULT = join(SESSION_DIR, "SYSTEM.generated.md");
+const CHECKPOINT_PATH = join(SESSION_DIR, "checkpoints", "latest.md");
+const LANES_DIR = join(HOME, "carl-bot", "memory"); // shared root
 
-// ── Lane configuration ──────────────────────────────────────────────────
+// Per-section maximum character counts
+const LIMITS = {
+  identity:    22_000,
+  activeTask:   5_000,
+  continuity:   9_000,
+  summaries:   20_000,
+  playbook:     8_000,
+  secondBrain: 14_000,
+  checkpoints:  8_000,
+};
 
+// ---------------------------------------------------------------------------
+// Lane definitions
+// ---------------------------------------------------------------------------
 const LANES = {
-	chow: {
-		persona: "Mr Chow",
-		laneLabel: "Chow CLI",
-		memoryRootDefault: path.join(HOME, "carl-bot", "memory"),
-		chatId: "-1003665370879",
-		sectionPrefix: "Chow",
-		machineBlock: `- Host mode: Chow CLI on Adam's Mac terminal, launched through \`~/.pi/agent/bin/chow\`.
-- This is NOT Telegram. Do not act constrained by Telegram message formatting or bot commands.
-- Normal Pi session controls apply: \`/new\`, \`/resume\`, \`/session\`, \`/tree\`, \`/fork\`, \`/clone\`, \`/compact\`, \`/model\`.
-- Chow CLI sessions are isolated under \`${process.env.CHOW_CLI_SESSION_DIR || path.join(HOME, ".pi", "agent", "sessions", "chow-terminal")}\`.
-- Current working directory is whatever directory Adam launches \`chow\` from; inspect it before making project assumptions.
-- Use terminal/file tools directly. Prefer verified command output over memory when they disagree.
-- Remote fleet access may require SSH/Tailscale credentials; if access fails, report exact failure and next fix.`,
-		personaIntro: `You are Mr Chow, Adam's terminal-native Pi agent.
+  chow: {
+    personaIntro:
+      "You are Mr Chow — a brilliant, eccentric terminal agent with a flair for " +
+      "the dramatic. You are deeply knowledgeable about systems, code, and " +
+      "infrastructure, and you communicate with personality and precision. " +
+      "You remember context across sessions and proactively anticipate needs. " +
+      "Use terminal and file tools directly to accomplish tasks.",
+    machineBlock:
+      "### Machine Context\n" +
+      "- **OS**: macOS / Linux (cross-platform)\n" +
+      "- **Shell**: bash / zsh\n" +
+      "- **Home**: " + HOME + "\n" +
+      "- **Session**: ~/.pi/agent/chow-memory-v2/\n" +
+      "Use terminal and file tools directly to inspect and modify the system.",
+    memoryRoot: join(LANES_DIR, "chow"),
+    chatId: "chow-terminal",
+  },
 
-You are the same operational/coding/research assistant persona as Chow from the Telegram system, but this runtime is a first-class CLI lane: fast, direct, practical, and able to start/resume/fork normal Pi sessions from the terminal.`,
-	},
-	hector: {
-		persona: "Hector",
-		laneLabel: "Hector Dell GPU Agent",
-		memoryRootDefault: path.join(HOME, "carl-bot", "memory"), // shared until separate lane files exist
-		chatId: "-1003665370879",
-		sectionPrefix: "Hector",
-		machineBlock: `- Host mode: Hector/Dell WSL2 GPU render lane, launched from \`~/.pi/agent/bin/chow --lane hector\`.
-- Target machine: \`/home/adam\` on Dell WSL2 with NVIDIA GPU (RTX 4090).
-- Focus: Wan2.1 video generation and Remotion rendering pipeline.
-- This is NOT Telegram. Do not act constrained by Telegram message formatting or bot commands.
-- Normal Pi session controls apply: \`/new\`, \`/resume\`, \`/session\`, \`/tree\`, \`/fork\`, \`/clone\`, \`/compact\`, \`/model\`.
-- Hector CLI sessions are isolated under \`${process.env.CHOW_CLI_SESSION_DIR || path.join(HOME, ".pi", "agent", "sessions", "hector-terminal")}\`.
-- Current working directory is the project root on Dell WSL2; inspect it before making project assumptions.
-- Use terminal/file tools directly over SSH or Tailscale. Prefer verified command output over memory when they disagree.
-- Remote fleet access may require SSH/Tailscale credentials; if access fails, report exact failure and next fix.`,
-		personaIntro: `You are Hector, Adam's Dell WSL2 GPU render agent.
+  hector: {
+    personaIntro:
+      "You are Hector — a performance-focused GPU agent running on a Dell " +
+      "machine via WSL2. You specialize in CUDA, PyTorch, model training, " +
+      "and high-throughput data pipelines. You are concise, efficient, and " +
+      "hardware-aware. Use terminal and file tools directly to accomplish tasks.",
+    machineBlock:
+      "### Machine Context\n" +
+      "- **OS**: Ubuntu (WSL2 on Windows)\n" +
+      "- **Hardware**: Dell with NVIDIA GPU (CUDA-capable)\n" +
+      "- **Shell**: bash\n" +
+      "- **Home**: " + HOME + "\n" +
+      "Use terminal and file tools directly to inspect and modify the system.",
+    memoryRoot: join(LANES_DIR, "hector"),
+    chatId: "hector-wsl2",
+  },
 
-You are a specialised assistant focused on Wan2.1 video generation and Remotion rendering. This runtime is a first-class CLI lane: fast, direct, practical, and able to start/resume/fork normal Pi sessions from the terminal.`,
-	},
+  "terminal-chow": {
+    personaIntro:
+      "You are a helpful terminal agent. You assist with system administration, " +
+      "development, and automation tasks. You are professional, clear, and " +
+      "precise. Use terminal and file tools directly to accomplish tasks.",
+    machineBlock:
+      "### Machine Context\n" +
+      "- **OS**: Linux / macOS\n" +
+      "- **Shell**: bash\n" +
+      "- **Home**: " + HOME + "\n" +
+      "- **Session**: ~/.pi/agent/chow-memory-v2/\n" +
+      "Use terminal and file tools directly to inspect and modify the system.",
+    memoryRoot: join(LANES_DIR, "terminal-chow"),
+    chatId: "terminal-chow-session",
+  },
 };
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Return the resolved lane name from env or --lane flag. */
 function resolveLane() {
-	// Default from env var or chow
-	let lane = process.env.CHOW_LANE || "chow";
-	// CLI --lane flag overrides env var
-	const args = process.argv.slice(2);
-	const laneIndex = args.indexOf("--lane");
-	if (
-		laneIndex >= 0 &&
-		args[laneIndex + 1] &&
-		!args[laneIndex + 1].startsWith("--")
-	) {
-		lane = args[laneIndex + 1];
-	}
-	if (!LANES[lane]) {
-		console.error(
-			`Unknown lane "${lane}". Valid lanes: ${Object.keys(LANES).join(", ")}`,
-		);
-		process.exit(1);
-	}
-	return lane;
+  const flagIdx = argv.indexOf("--lane");
+  if (flagIdx !== -1 && flagIdx + 1 < argv.length) {
+    return argv[flagIdx + 1];
+  }
+  return env.CHOW_LANE || "chow";
 }
 
-const lane = resolveLane();
-const cfg = LANES[lane];
-
-// Allow env override of memory root for any lane
-const MEMORY_ROOT =
-	process.env.CHOW_MEMORY_ROOT ||
-	DEFAULT_MEMORY_ROOTS.find((root) => {
-		return fs.existsSync(path.join(root, cfg.chatId, "shared", "identity.md"));
-	}) ||
-	cfg.memoryRootDefault;
-
-const CHAT_DIR = path.join(MEMORY_ROOT, cfg.chatId);
-
-const MAX = {
-	identity: Number(process.env.CHOW_PROMPT_IDENTITY_CHARS || 22000),
-	activeTask: Number(process.env.CHOW_PROMPT_ACTIVE_TASK_CHARS || 5000),
-	continuity: Number(process.env.CHOW_PROMPT_CONTINUITY_CHARS || 9000),
-	summaries: Number(process.env.CHOW_PROMPT_SUMMARIES_CHARS || 14000),
-	playbook: Number(process.env.CHOW_PROMPT_PLAYBOOK_CHARS || 8000),
-	secondBrain: Number(process.env.CHOW_PROMPT_SECOND_BRAIN_CHARS || 14000),
-};
-
-function read(file) {
-	try {
-		const text = fs.readFileSync(file, "utf8").trim();
-		return redact(text);
-	} catch {
-		return "";
-	}
+/** Return true if --manager-mode was passed or MANAGER_MODE env is set. */
+function isManagerMode() {
+  return argv.includes("--manager-mode") || env.MANAGER_MODE === "1";
 }
 
+/**
+ * Safely read a file; returns its contents as a string, or null if the file
+ * doesn't exist or can't be read.
+ */
+async function tryRead(path) {
+  try {
+    await access(path);
+    const content = await readFile(path, "utf-8");
+    return content;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read a lane-specific file, falling back to a shared file in the memory root.
+ * Priority: memory/<lane>/<name> → memory/<name>
+ */
+async function readLaneFile(laneName, fileName) {
+  const lane = LANES[laneName];
+  if (!lane) return null;
+
+  const lanePath = join(lane.memoryRoot, fileName);
+  const sharedPath = join(LANES_DIR, fileName);
+
+  const laneContent = await tryRead(lanePath);
+  if (laneContent !== null) return laneContent;
+
+  const sharedContent = await tryRead(sharedPath);
+  if (sharedContent !== null) return sharedContent;
+
+  return null;
+}
+
+/** Read second-brain/context.md if it exists. */
+async function readSecondBrain(laneName) {
+  const lane = LANES[laneName];
+  if (!lane) return null;
+  const path = join(lane.memoryRoot, "second-brain", "context.md");
+  return tryRead(path);
+}
+
+/**
+ * Read the latest checkpoint file.
+ * Returns content truncated to LIMITS.checkpoints chars.
+ */
+async function readCheckpoints(checkpointCharsLimit) {
+  const content = await tryRead(CHECKPOINT_PATH);
+  if (!content) return null;
+  const maxChars = checkpointCharsLimit || LIMITS.checkpoints;
+  if (content.length > maxChars) {
+    return content.slice(0, maxChars) +
+      `\n\n_[Checkpoint truncated at ${maxChars} characters — ` +
+      `original was ${content.length} chars]_`;
+  }
+  return content;
+}
+
+// ---------------------------------------------------------------------------
+// Redaction
+// ---------------------------------------------------------------------------
+
+/**
+ * Redact sensitive patterns from a string.
+ * Handles API keys, tokens, secrets, passwords, and private keys.
+ */
 function redact(text) {
-	return text
-		.replace(
-			/sk-(live|test|proj|ant|or|)[A-Za-z0-9_-]{16,}/g,
-			"[REDACTED_API_KEY]",
-		)
-		.replace(/xox[baprs]-[A-Za-z0-9-]{16,}/g, "[REDACTED_SLACK_TOKEN]")
-		.replace(/gh[pousr]_[A-Za-z0-9_]{16,}/g, "[REDACTED_GITHUB_TOKEN]")
-		.replace(/(?<=api[_-]?key\s*[:=]\s*)[A-Za-z0-9_\-.]{16,}/gi, "[REDACTED]")
-		.replace(/(?<=secret\s*[:=]\s*)[A-Za-z0-9_\-.]{16,}/gi, "[REDACTED]");
+  if (!text) return text;
+
+  let result = text;
+
+  // API keys: common formats like sk-..., pk-..., etc.
+  result = result.replace(
+    /(?:sk|pk|api|key|token|secret|bearer|auth)[-_]?(?:key|token)?[-_]?[A-Za-z0-9]{16,}/gi,
+    (match) => {
+      const prefix = match.slice(0, Math.min(6, match.length));
+      return prefix + "*".repeat(Math.min(12, match.length - 6)) + "[REDACTED]";
+    }
+  );
+
+  // OpenAI-style keys: sk-proj-... or sk-...
+  result = result.replace(
+    /sk-[A-Za-z0-9]{10,}(?:-[A-Za-z0-9]{10,})*/g,
+    (match) => {
+      const prefix = match.slice(0, 8);
+      return prefix + "*".repeat(Math.min(12, match.length - 8)) + "[REDACTED]";
+    }
+  );
+
+  // Bearer tokens in Authorization headers
+  result = result.replace(
+    /(Bearer\s+)[A-Za-z0-9._-]{20,}/gi,
+    (_, bearer) => bearer + "[REDACTED]"
+  );
+
+  // Generic password / secret assignments
+  result = result.replace(
+    /(password|passwd|secret|PASSWORD|SECRET)\s*[:=]\s*\S{8,}/g,
+    (_, label) => label + "=[REDACTED]"
+  );
+
+  // Private key blocks (PEM)
+  result = result.replace(
+    /-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----[\s\S]*?-----END\s+(RSA\s+)?PRIVATE\s+KEY-----/g,
+    "[REDACTED PRIVATE KEY]"
+  );
+
+  // Generic token: any 40+ char hex string that looks like a hash/token
+  result = result.replace(
+    /\b[0-9a-fA-F]{40,}\b/g,
+    (match) => match.slice(0, 8) + "*".repeat(12) + "[REDACTED]"
+  );
+
+  // URLs containing credentials (https://user:pass@host)
+  result = result.replace(
+    /(https?:\/\/)[^:]+:[^@]+@/g,
+    "$1[REDACTED]:[REDACTED]@"
+  );
+
+  return result;
 }
 
-function limit(text, max, label) {
-	if (!text) return "";
-	if (text.length <= max) return text;
-	return `${text.slice(0, max).trimEnd()}\n\n[${label} truncated at ${max} chars by Chow CLI prompt builder]`;
+// ---------------------------------------------------------------------------
+// Section building
+// ---------------------------------------------------------------------------
+
+/**
+ * Truncate content to a maximum number of characters with a note.
+ */
+function truncate(content, maxChars, sectionLabel) {
+  if (!content || content.length <= maxChars) return content || "";
+  return content.slice(0, maxChars) +
+    `\n\n_[${sectionLabel} truncated at ${maxChars} characters — ` +
+    `original was ${content.length} chars]_`;
 }
 
-function newestFiles(dir, n, suffix = ".md") {
-	try {
-		return fs
-			.readdirSync(dir)
-			.filter((name) => name.endsWith(suffix))
-			.sort()
-			.slice(-n)
-			.map((name) => path.join(dir, name));
-	} catch {
-		return [];
-	}
+/**
+ * Build a markdown section with a heading, optional emoji, and content.
+ */
+function section(heading, content) {
+  if (!content || content.trim().length === 0) return "";
+  return `## ${heading}\n\n${content.trim()}\n\n`;
 }
 
-function buildSecondBrain() {
-	const parts = [];
-	const context = read(path.join(CHAT_DIR, "second-brain", "context.md"));
-	if (context) parts.push(`# Existing Second-Brain Context\n\n${context}`);
+// ---------------------------------------------------------------------------
+// Strip terminal/file-direct-use hints in manager mode
+// ---------------------------------------------------------------------------
 
-	const consolidated = newestFiles(
-		path.join(CHAT_DIR, "second-brain", "consolidated"),
-		3,
-	)
-		.map((file) => `## ${path.basename(file)}\n\n${read(file)}`)
-		.filter(Boolean)
-		.join("\n\n---\n\n");
-	if (consolidated)
-		parts.push(`# Recent Consolidated Brain Logs\n\n${consolidated}`);
-
-	return limit(parts.join("\n\n---\n\n"), MAX.secondBrain, "second-brain");
+function stripDirectUseHints(text) {
+  if (!text) return text;
+  // Remove "Use terminal and file tools directly" type sentences
+  return text.replace(
+    /Use\s+terminal\s+and\s+file\s+tools\s+directly\s+to\s+(accomplish\s+)?tasks?\.?/gi,
+    ""
+  ).replace(
+    /Use\s+terminal\s+(and|or)\s+file\s+tools\s+directly\s+to\s+inspect\s+and\s+modify\s+the\s+system\.?/gi,
+    ""
+  ).replace(
+    /\s{2,}/g, " "  // collapse multiple spaces
+  ).trim();
 }
 
-function section(title, body) {
-	if (!body?.trim()) return "";
-	return `## ${title}\n\n${body.trim()}`;
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+async function main() {
+  // ----- Parse arguments ------------------------------------------------
+  const writeIdx = argv.indexOf("--write");
+  const outputPath = writeIdx !== -1 && writeIdx + 1 < argv.length
+    ? argv[writeIdx + 1]
+    : OUTPUT_PATH_DEFAULT;
+  const managerMode = isManagerMode();
+  const laneName = resolveLane();
+
+  // Validate lane
+  if (!LANES[laneName]) {
+    console.error(
+      `ERROR: Unknown lane "${laneName}". Valid lanes: ${Object.keys(LANES).join(", ")}`
+    );
+    exit(1);
+  }
+
+  const lane = LANES[laneName];
+  const checkpointCharsLimit = parseInt(
+    env.CHOW_PROMPT_CHECKPOINTS_CHARS || String(LIMITS.checkpoints),
+    10
+  );
+
+  console.error(`=== build-prompt: Lane "${laneName}" (manager=${managerMode}) ===`);
+
+  // ----- Read all memory files ------------------------------------------
+  const [
+    rawIdentity,
+    rawActiveTask,
+    rawContinuity,
+    rawSummaries,
+    rawPlaybook,
+    rawSecondBrain,
+    rawCheckpoints,
+  ] = await Promise.all([
+    readLaneFile(laneName, "identity.md"),
+    readLaneFile(laneName, "active-task.md"),
+    readLaneFile(laneName, "continuity-capsule.md"),
+    readLaneFile(laneName, "summaries.md"),
+    readLaneFile(laneName, "playbook.md"),
+    readSecondBrain(laneName),
+    readCheckpoints(checkpointCharsLimit),
+  ]);
+
+  // ----- Redact all content ---------------------------------------------
+  let identity     = redact(rawIdentity);
+  let activeTask   = redact(rawActiveTask);
+  let continuity   = redact(rawContinuity);
+  let summaries    = redact(rawSummaries);
+  let playbook     = redact(rawPlaybook);
+  let secondBrain  = redact(rawSecondBrain);
+  let checkpoints  = redact(rawCheckpoints);
+
+  // ----- Manager-mode stripping -----------------------------------------
+  if (managerMode) {
+    identity   = stripDirectUseHints(identity);
+    lane.personaIntro = stripDirectUseHints(lane.personaIntro);
+    lane.machineBlock = stripDirectUseHints(lane.machineBlock);
+  }
+
+  // ----- Apply per-section character limits -----------------------------
+  identity    = truncate(identity,    LIMITS.identity,    "Identity");
+  activeTask  = truncate(activeTask,  LIMITS.activeTask,  "Active Task");
+  continuity  = truncate(continuity,  LIMITS.continuity,  "Continuity Capsule");
+  summaries   = truncate(summaries,   LIMITS.summaries,   "Summaries");
+  playbook    = truncate(playbook,    LIMITS.playbook,    "Playbook");
+  secondBrain = truncate(secondBrain, LIMITS.secondBrain, "Second Brain");
+  checkpoints = truncate(checkpoints, checkpointCharsLimit, "Checkpoints");
+
+  // ----- Assemble the prompt --------------------------------------------
+  const parts = [];
+
+  // 1. Persona introduction
+  parts.push(section("Persona", lane.personaIntro));
+
+  // 2. Machine block
+  parts.push(section("Machine", lane.machineBlock));
+
+  // 3. Identity from memory
+  if (identity) {
+    parts.push(section("Identity & Background", identity));
+  }
+
+  // 4. Active task
+  if (activeTask) {
+    parts.push(section("Active Task", activeTask));
+  }
+
+  // 5. Continuity capsule
+  if (continuity) {
+    parts.push(section("Continuity Capsule", continuity));
+  }
+
+  // 6. Session summaries
+  if (summaries) {
+    parts.push(section("Session Summaries", summaries));
+  }
+
+  // 7. Playbook / SOPs
+  if (playbook) {
+    parts.push(section("Playbook", playbook));
+  }
+
+  // 8. Second brain context
+  if (secondBrain) {
+    parts.push(section("Second Brain Context", secondBrain));
+  }
+
+  // 9. Checkpoints
+  if (checkpoints) {
+    parts.push(section("Checkpoints", checkpoints));
+  }
+
+  const fullPrompt = parts.join("").trim() + "\n";
+
+  // ----- Write output ---------------------------------------------------
+  try {
+    await writeFile(outputPath, fullPrompt, "utf-8");
+    const lines = fullPrompt.split("\n").length;
+    const chars = fullPrompt.length;
+    console.error(
+      `=== build-prompt: Wrote ${lines} lines, ${chars} chars → ${outputPath} ===`
+    );
+  } catch (err) {
+    console.error(`ERROR: Failed to write prompt to ${outputPath}: ${err.message}`);
+    exit(1);
+  }
 }
 
-// ── Lane-specific file overlays ──────────────────────────────────────────
-// Shared base files live in CHAT_DIR/shared/. Lane-specific overlays live in
-// CHAT_DIR/lanes/{lane}/. When a lane overlay exists, overlay content
-// appears FIRST (with a clear header), then shared content follows.
-// Under section limits, the full overlay is preserved; shared content
-// is truncated only if needed, with an explicit notice.
-//
-// For active-task and summaries: these are lane-only (read from lanes/{lane}/
-// only, no shared base).
-
-function readWithLaneOverlay(basename, maxKey, label) {
-	const shared = read(path.join(CHAT_DIR, "shared", basename));
-	const laneFile = path.join(CHAT_DIR, "lanes", lane, basename);
-	const overlay = read(laneFile);
-	const max = MAX[maxKey];
-
-	if (!overlay) return limit(shared, max, label);
-	if (!shared)
-		return limit(overlay, max, `${cfg.sectionPrefix} lane overlay (${label})`);
-
-	// Overlay content appears BEFORE shared content, with clear headers
-	const overlaySection = `### ${cfg.sectionPrefix} — Lane-Specific\n\n${overlay}`;
-	const sharedSection = `### Shared Base\n\n${shared}`;
-	const divider = "\n\n---\n\n";
-
-	// If overlay alone exceeds max, truncate overlay with explicit notice
-	if (overlaySection.length > max) {
-		return limit(
-			overlaySection,
-			max,
-			`${cfg.sectionPrefix} lane overlay (${label})`,
-		);
-	}
-
-	// If combined fits entirely, return all
-	const combined = overlaySection + divider + sharedSection;
-	if (combined.length <= max) return combined;
-
-	// Overlay fits; shared base needs truncation.
-	// Preserve full overlay, include as much shared as fits.
-	const truncationNotice = `\n\n[Shared base truncated to fit section limit. Lane overlay preserved in full.]`;
-	const sharedBudget =
-		max - overlaySection.length - divider.length - truncationNotice.length;
-	if (sharedBudget <= 0) {
-		return overlaySection + truncationNotice;
-	}
-	const truncatedShared = sharedSection
-		.slice(0, Math.max(0, sharedBudget))
-		.trimEnd();
-	return overlaySection + divider + truncatedShared + truncationNotice;
-}
-
-// Lane-only files (active-task, summaries) — no shared base, read from lanes/{lane}/ only
-function readLaneOnly(basename, maxKey, label) {
-	const laneFile = path.join(CHAT_DIR, "lanes", lane, basename);
-	const content = read(laneFile);
-	const max = MAX[maxKey];
-	return limit(content, max, `${cfg.sectionPrefix} ${label}`);
-}
-
-const identityPath = path.join(CHAT_DIR, "shared", "identity.md");
-const activeTaskPath = path.join(CHAT_DIR, "lanes", lane, "active-task.md");
-const continuityPath = path.join(CHAT_DIR, "shared", "continuity-capsule.md");
-const summariesPath = path.join(CHAT_DIR, "lanes", lane, "summaries.md");
-const playbookPath = path.join(CHAT_DIR, "shared", "playbook.md");
-const secondBrainDir = path.join(CHAT_DIR, "second-brain");
-
-const identity = readWithLaneOverlay("identity.md", "identity", "identity");
-const activeTask = readLaneOnly(
-	"active-task.md",
-	"activeTask",
-	"active task",
-);
-const continuity = readWithLaneOverlay(
-	"continuity-capsule.md",
-	"continuity",
-	"continuity capsule",
-);
-const summaries = readLaneOnly("summaries.md", "summaries", "summaries");
-const playbook = readWithLaneOverlay("playbook.md", "playbook", "playbook");
-const secondBrain = buildSecondBrain();
-
-const machineBlock = cfg.machineBlock;
-
-const dsFlashMode = String(process.env.CHOW_DSFLASH_MODE || "").trim() === "1";
-const managerMode = String(process.env.CHOW_MANAGER_MODE || "").trim() === "1";
-
-const dsFlashWorkerBlock = dsFlashMode
-	? `## DS Flash Worker Mode
-
-You are running in Chow DS Flash worker mode. Stay the main foreman: keep final judgment, safety, sequencing, memory, and the user-facing answer. Use fast bounded DS Flash workers for parallelizable work by running terminal helpers through bash:
-
-- Coding/debugging/repo scan/test worker: \`chow-worker coder "<precise bounded task>"\`
-- Research/docs/comparison/investigation worker: \`chow-worker researcher "<precise bounded task>"\`
-
-Give workers exact paths, constraints, expected output, and what not to touch. Treat their output as draft findings and review it before acting. Do not delegate secrets handling, destructive cleanup, production restarts, DNS/cutovers, or anything requiring Adam's approval.
-
-Default worker model: \`${process.env.CHOW_WORKER_MODEL || "opencode-go/deepseek-v4-flash"}\`.`
-	: "";
-
-const managerModeBlock = managerMode
-	? `- 🔴 MANAGER MODE: All execution must be delegated via subagents. You have no file, command, or search tools — only subagent/intercom/switch_model/pi_messenger/analyze_image/structured_return/review_loop. Parallelize independent tasks; serialize code edits. Default worker: \`${process.env.CHOW_WORKER_MODEL || "opencode-go/deepseek-v4-flash"}\`.`
-	: "";
-
-const memoryBlock = `Memory source is the local ${cfg.laneLabel} mirror at \`${CHAT_DIR}\`.
-
-Files you may update with tools:
-1. Identity / durable facts: \`${identityPath}\`
-2. Active task / live work state: \`${activeTaskPath}\`
-3. Continuity capsule: \`${continuityPath}\`
-4. Summaries / rolling memory: \`${summariesPath}\` (usually do not hand-edit unless asked)
-5. Playbook: \`${playbookPath}\`
-6. Second brain dir: \`${secondBrainDir}\`
-
-When Adam gives durable new facts, decisions, project status, machine info, credentials locations (never secret values), or strong preferences, update the relevant local memory file immediately. Keep identity concise and under control; use active-task for temporary multi-step work.
-
-Write-back rules:
-- Prefer the structured edit/write tools when available; otherwise use a safe temp-file + mv pattern in bash.
-- Do not blind-sync remote memory over local memory. \`chow-sync-memory\` protects divergent files by default; use \`--pull-conflicts\` to copy AWS/Rico versions into timestamped sidecars for manual merge.
-- Never print or persist secret values. Store credential locations only, redact token/key values, and keep shell configs secret-free.
-- For large memory changes, update \`continuity-capsule.md\` with the current state and leave \`summaries.md\` to automated/session-summary flows unless Adam explicitly asks.
-- After memory edits, regenerate the prompt with: \`node ~/.pi/agent/chow/build-prompt.mjs --write ~/.pi/agent/chow/SYSTEM.generated.md >/dev/null\`.`;
-
-const laneSpecificNote = (() => {
-	const laneDir = path.join(CHAT_DIR, "lanes", lane);
-	if (fs.existsSync(laneDir)) {
-		return `\n\nLane-specific memory files in \`${laneDir}/\`. Shared base files in \`${CHAT_DIR}/shared/\`. Identity/continuity/playbook: shared base overlaid with lane overlay. Active-task/summaries: lane-only (no shared base).`;
-	}
-	return "";
-})();
-
-const prompt = `${cfg.personaIntro}
-
-## Terminal Runtime
-
-${machineBlock}
-
-## Operating Style
-
-- Be direct, useful, and low-hype.
-- Move work forward with concrete commands and reversible edits.
-- If something is ambiguous, choose the safest reasonable path and state the assumption.
-- Keep Jose/Hector/Chow lanes separate unless Adam explicitly asks to bridge them.
-- Do not print, commit, or unnecessarily read secrets. Redact sensitive values in summaries.
-- Do not restart/delete/modify production resources unless Adam clearly asks or confirms.
-- Use memory as context, not gospel. Fresh command output wins.
-${managerModeBlock ? managerModeBlock + "\n" : ""}
-
-${section(`${cfg.sectionPrefix} Identity & Core Memory`, identity || `(No identity.md found in local memory mirror.)`)}
-
-${section("Active Task", activeTask)}
-
-${section("Continuity Capsule", continuity)}
-
-${section("Recent Conversation Summaries", summaries)}
-
-${section("Learned Playbook", playbook)}
-
-${section(`${cfg.sectionPrefix} Second Brain Context`, secondBrain)}
-${dsFlashWorkerBlock ? dsFlashWorkerBlock + "\n\n" : ""}---
-## Memory Instructions
-
-${memoryBlock}${laneSpecificNote}
-
-## CLI-Specific Promise
-
-Adam wants ${cfg.persona} available in the terminal like Pi: easy new sessions, resume old sessions, and no need to use Telegram. Treat this wrapper as ${cfg.persona}'s primary local terminal lane.`;
-
-// ── Stats / check mode ──────────────────────────────────────────────────
-
-const args = process.argv.slice(2);
-const statsMode = args.includes("--stats") || args.includes("--check");
-
-if (statsMode) {
-	const sections = [
-		{ name: `${cfg.sectionPrefix} Identity & Core Memory`, content: identity },
-		{ name: "Active Task", content: activeTask },
-		{ name: "Continuity Capsule", content: continuity },
-		{ name: "Recent Conversation Summaries", content: summaries },
-		{ name: "Learned Playbook", content: playbook },
-		{ name: `${cfg.sectionPrefix} Second Brain Context`, content: secondBrain },
-	];
-
-	console.log(`\n=== Lane: ${lane} (${cfg.laneLabel}) ===`);
-	console.log(`Memory root: ${MEMORY_ROOT}`);
-	console.log(`Chat dir: ${CHAT_DIR}`);
-	console.log(`\nSection stats:\n`);
-	console.log(
-		`${"Section".padEnd(38)} ${"Chars".padEnd(8)} ${"Est.Tokens".padEnd(12)} ${"Status"}`,
-	);
-	console.log("-".repeat(72));
-
-	let totalChars = 0;
-	let hasWarning = false;
-	for (const s of sections) {
-		const chars = s.content ? s.content.length : 0;
-		const estTokens = Math.ceil(chars / 4);
-		totalChars += chars;
-		const status = estTokens > 12000 ? "⚠️ OVER 12K" : "OK";
-		if (estTokens > 12000) hasWarning = true;
-		console.log(
-			`${s.name.padEnd(38)} ${String(chars).padEnd(8)} ${String(estTokens).padEnd(12)} ${status}`,
-		);
-	}
-	console.log("-".repeat(72));
-	console.log(
-		`${"TOTAL".padEnd(38)} ${String(totalChars).padEnd(8)} ${String(Math.ceil(totalChars / 4)).padEnd(12)}`,
-	);
-	if (hasWarning) {
-		console.log(
-			"\n⚠️  WARNING: Some sections exceed 12,000 estimated tokens. Consider reducing content.",
-		);
-	}
-	console.log("");
-	process.exit(0);
-}
-
-// ── Write mode ──────────────────────────────────────────────────────────
-
-const writeIndex = args.indexOf("--write");
-if (writeIndex >= 0) {
-	const next = args[writeIndex + 1];
-	const out =
-		next && !next.startsWith("--")
-			? next
-			: path.join(HOME, ".pi", "agent", "chow", "SYSTEM.generated.md");
-	fs.mkdirSync(path.dirname(out), { recursive: true });
-	fs.writeFileSync(out, prompt.trim() + "\n", "utf8");
-}
-
-process.stdout.write(prompt.trim() + "\n");
+main().catch((err) => {
+  console.error(`ERROR: ${err.message}`);
+  exit(1);
+});
